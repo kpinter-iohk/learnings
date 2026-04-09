@@ -1,0 +1,14 @@
+---
+title: "Learnings"
+---
+
+Welcome to the team learning materials.
+
+## Topics
+
+Browse the topics in the sidebar, or start with the sample below.
+
+::: {.callout-tip}
+## Interactive content
+Pages can include interactive elements — try the example in [Getting Started](getting-started.qmd).
+:::

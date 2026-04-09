@@ -1,0 +1,19 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "Learnings"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+  page-footer:
+    center: "Internal use only"
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    code-fold: true
+    code-tools: true
