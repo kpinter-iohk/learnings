@@ -1,6 +1,8 @@
 project:
   type: website
   output-dir: _site
+  resources:
+    - robots.txt
 
 website:
   title: "Learnings"
@@ -17,3 +19,5 @@ format:
     toc: true
     code-fold: true
     code-tools: true
+    include-in-header:
+      text: '<meta name="robots" content="noindex, nofollow">'
