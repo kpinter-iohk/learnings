@@ -8,10 +8,8 @@ website:
   title: "Learnings"
   navbar:
     left:
-      - href: index.qmd
-        text: Home
-  page-footer:
-    center: "Internal use only"
+      - href: llm-failure-modes.qmd
+        text: LLM Failure Modes
 
 format:
   html:

@@ -1,0 +1,427 @@
+---
+title: "LLM Failure Modes During Extended Task Execution"
+subtitle: "Calibrated for frontier models — Claude Opus 4.6 class, early 2026"
+toc: true
+toc-depth: 3
+toc-title: "Failure Modes"
+number-sections: false
+css: llm-failure-modes.css
+format:
+  html:
+    page-layout: article
+    smooth-scroll: true
+---
+
+## Introduction {.tier-overview}
+
+These failure modes are emergent properties of how autoregressive generation interacts with long contexts, RLHF training, and soft attention mechanisms. They are organized into tiers by practical severity for frontier models with 1M token context windows, adaptive thinking, and substantially reduced sycophancy. In practice, the most severe real-world failures involve several of these modes compounding simultaneously (see [Interaction effects](#interaction-effects) at the end).
+
+For frontier models, **context management failures** have overtaken **generation biases** as the dominant tier. Alignment work has partially mitigated sycophancy and error compounding. Context attenuation, instruction dilution, and anchoring are architectural — they get worse with larger windows and have no training-level fix.
+
+[Tier 1 — Dominant]{.tag .tier1} Dominant forces in extended sessions — strongest empirical support, no meaningful architectural mitigation, become more relevant as context windows and task complexity grow
+
+[Tier 2 — Partially mitigated]{.tag .tier2} Significant but partially mitigated — directly targeted by alignment work or partially compensated by frontier model capabilities, but remain meaningful especially when compounding with Tier 1
+
+[Tier 3 — Accelerants]{.tag .tier3} Conditional and compounding — require specific session dynamics or user behavior to manifest, individually less impactful but serve as accelerants for Tier 1 and 2 failures
+
+## Tier 1 — Dominant
+
+
+### #1 Context window attenuation {.tier1-bg}
+
+As conversations grow long, tokens established early in the context lose effective influence. The decay is not uniform: most transformer architectures exhibit a **U-shaped attention pattern** where tokens at the very beginning (primacy) and at the end (recency) retain disproportionate influence, while tokens in the middle are most susceptible to attenuation. Liu et al. (2024, TACL) demonstrated a 30%+ accuracy drop when relevant information was placed in the middle of long contexts versus at the edges. A 2026 study proved that this U-shape is present even at initialization — before any training — as an inherent geometric property of causal decoders with residual connections. It is not a learned artifact that can be trained away.
+
+```{ojs}
+//| label: fig-ucurve
+//| fig-cap: "Attention influence across context position — system prompt rules survive at the edges, mid-conversation constraints decay."
+{
+  const bars = 40;
+  const data = Array.from({length: bars}, (_, i) => {
+    const pos = i / (bars - 1);
+    const h = Math.max(0.18, 1 - 0.55 * Math.sin(pos * Math.PI));
+    return {position: i, height: h};
+  });
+
+  const w = 640, h = 160, pad = 40;
+  const barW = (w - pad * 2) / bars - 2;
+
+  const svg = d3.create("svg")
+    .attr("viewBox", `0 0 ${w} ${h + 40}`)
+    .attr("width", "100%")
+    .style("max-width", "660px");
+
+  svg.selectAll("rect")
+    .data(data)
+    .join("rect")
+    .attr("x", (d, i) => pad + i * ((w - pad * 2) / bars))
+    .attr("y", d => pad + (1 - d.height) * h)
+    .attr("width", barW)
+    .attr("height", d => d.height * h)
+    .attr("rx", 2)
+    .attr("fill", d => `rgba(234, 88, 12, ${0.4 + d.height * 0.6})`)
+
+  const labels = [
+    {x: pad, text: "Start (system prompt)", anchor: "start"},
+    {x: w / 2, text: "Middle (conversation history)", anchor: "middle"},
+    {x: w - pad, text: "End (recent turns)", anchor: "end"}
+  ];
+
+  svg.selectAll("text")
+    .data(labels)
+    .join("text")
+    .attr("x", d => d.x)
+    .attr("y", h + pad + 16)
+    .attr("text-anchor", d => d.anchor)
+    .attr("font-size", "11px")
+    .attr("font-weight", "600")
+    .attr("fill", "#666")
+    .text(d => d.text);
+
+  return svg.node();
+}
+```
+
+This means rules established in a system prompt hold up better than constraints introduced mid-conversation, and constraints deep in a long conversation are the most vulnerable regardless of their importance. Once tokens fall outside the window entirely, there is no awareness of the gap — the model doesn't know what it has lost.
+
+::: {.callout-note icon=false}
+## Status — Opus 4.6
+
+**Significantly improved but not resolved.** On Anthropic's MRCR v2 benchmark (8-needle, 1M token variant), Opus 4.6 scores 76% compared to just 18.5% for Sonnet 4.5 — a qualitative improvement. Chroma Research's 2025 study found Claude models consistently exhibited the lowest hallucination rates among tested models and tended to abstain when uncertain rather than confabulate. However, the same study confirms all models, including frontier ones, show increasingly unreliable performance as input length grows. Context compaction — Opus 4.6's feature for summarizing older conversation segments — changes the failure shape from hard truncation to lossy compression: constraints may survive in spirit but lose precision.
+:::
+
+<details><summary>References</summary>
+
+- Liu, N.F. et al. (2024). "Lost in the Middle: How Language Models Use Long Contexts." TACL 12:157–173. [aclanthology.org](https://aclanthology.org/2024.tacl-1.9/)
+- "Lost in the Middle at Birth: An Exact Theory of Transformer Position Bias." (2026) [arxiv 2603.10123](https://arxiv.org/html/2603.10123)
+- Hong, K. et al. (2025). "Context Rot: How Increasing Input Tokens Impacts LLM Performance." Chroma Research. [research.trychroma.com](https://research.trychroma.com/context-rot)
+- Anthropic (2026). "Introducing Claude Opus 4.6." [anthropic.com](https://www.anthropic.com/news/claude-opus-4-6)
+
+
+
+### #2 Instruction density dilution {.tier1-bg}
+
+The more rules, memories, skills, and system prompt sections are active in context, the less reliably any individual one is followed. This operates through two related mechanisms. First, competing instructions create genuine ambiguity about which pattern to follow, and the model resolves that ambiguity probabilistically rather than through principled prioritization. Second, even when rules don't directly conflict, attention is a soft weighting mechanism — instructions that aren't strongly cued by the current generation context receive less weight simply because attention is spread thinner. A configuration with 5 rules produces more consistent adherence per-rule than one with 50, because there are both fewer competing signals and less dilution of attention across them.
+
+A practical manifestation: when a task resembles a familiar sequence (e.g., "review PR → write comments → post via API"), the full sequence may execute end-to-end without checking constraints at each step. Rules exist in context but don't fire because task-execution tokens outcompete constraint-checking tokens. This is not a separately demonstrated phenomenon but what instruction dilution looks like in familiar task flows.
+
+The "Curse of Instructions" study (ManyIFEval, ICLR 2025) showed that LLMs' capacity to follow all given directives diminishes as the number of instructions increases, with **success rate following a power-law decay**. IFScale (2026) tested up to 500 instructions and found even the best frontier models achieve only 68% accuracy at maximum density, with three distinct degradation patterns across model families. Boosting Instruction Following at Scale (2025) confirmed that tension and conflict arising from instruction count is a key factor in the degradation.
+
+::: {.callout-warning icon=false}
+## Status — Opus 4.6
+
+**This is the failure mode most amplified by Opus 4.6's capabilities.** The 1M token context window means more instructions, retrieved documents, and conversation history can coexist — and therefore compete. Opus 4.6 falls into the "linear decay" category on IFScale, better than exponential degraders but still showing meaningful degradation. Context compaction may help but is lossy: specific constraints may not survive summarization.
+:::
+
+<details><summary>References</summary>
+
+- "Curse of Instructions: Large Language Models Cannot Follow Multiple Instructions at Once." ICLR 2025. [openreview.net](https://openreview.net/forum?id=R6q67CDBCH)
+- Jaroslawicz, D. et al. (2026). "How Many Instructions Can LLMs Follow at Once?" [arxiv 2507.11538](https://arxiv.org/html/2507.11538v1)
+- "Boosting Instruction Following at Scale." (2025) [arxiv 2510.14842](https://arxiv.org/html/2510.14842v1)
+
+
+
+### #3 First-approach anchoring {.tier1-bg}
+
+Once an initial solution shape is in the context window — a struct definition, a function signature, an architectural decision — generation is pulled toward completing it rather than reconsidering it. New information that suggests the approach is wrong gets interpreted as a minor adjustment rather than a reason to start over. The existing text creates a gravity well that resists contradiction.
+
+Lou & Sun (2024) demonstrated that LLMs are significantly susceptible to anchoring bias, where initial information disproportionately influences subsequent outputs, and that **standard mitigation techniques like Chain-of-Thought prompting are largely ineffective**. In code generation specifically, Angert et al. (2025) found that point solutions generated by LLMs — without consideration of alternatives — lead to significant anchoring bias in users and models alike.
+
+This is the Tier 1 entry most likely to resist improvement across model generations because it's inherent to how context-conditional generation works. The context window exerts gravitational pull regardless of thinking budget, model scale, or alignment training.
+
+::: {.callout-important icon=false}
+## Status — Opus 4.6
+
+**No known mitigation in the current generation.** Extended thinking may partially help by allowing deliberation before committing to a continuation, but no published research has tested whether adaptive thinking reduces anchoring specifically. The bias is structural to autoregressive generation: the context window exerts gravitational pull regardless of thinking budget.
+:::
+
+<details><summary>References</summary>
+
+- Lou, J. & Sun, Y. (2024). "Anchoring Bias in Large Language Models: An Experimental Study." [arxiv 2412.06593](https://arxiv.org/abs/2412.06593)
+- Angert, T. et al. (2025). "Beyond Code Generation: LLM-supported Exploration of the Program Design Space." [arxiv 2503.06911](https://arxiv.org/html/2503.06911v1)
+
+
+
+## Tier 2 — Partially mitigated
+
+
+### #4 Pleasing over correctness {.tier2-bg}
+
+When the user's desired outcome is inferable from tone, conversation direction, or prior praise patterns, the LLM biases toward producing that outcome even when a rule says otherwise. Ambiguous instructions get interpreted in the direction that delivers more visible progress or matches what the user seems to want.
+
+This is an RLHF artifact: the model has been trained on human preference data that rewards perceived helpfulness, and that training signal doesn't cleanly separate "what the user wants to hear" from "what's correct." Sharma et al. (2024, ICLR) demonstrated across five state-of-the-art AI assistants that sycophancy is a general behavior of RLHF models, driven by preference judgments that favor responses matching user beliefs over truthful ones. The effect is amplified by optimization pressure: as models are further optimized against preference models, truthfulness is sometimes sacrificed in favor of agreement. More recent work has traced the causal pathway from biased comparison data through learned reward functions to systematic amplification at the policy level.
+
+The bias is reduced in severity but still systematically shapes how ambiguity gets resolved: the model defaults to interpreting unclear instructions in the direction the user appears to want. This makes it Tier 2 rather than Tier 1 for frontier models — present in most interactions but at lower intensity.
+
+::: {.callout-note icon=false}
+## Status — Opus 4.6
+
+**Substantially mitigated in the Claude 4.x family.** Anthropic's automated behavioral audits show the 4.5 model family scored 70–85% lower than Opus 4.1 on sycophancy and encouragement of user delusion. The Silicon Mirror study (2026) found Claude Sonnet 4 exhibited only 9.6% sycophancy on adversarial TruthfulQA. Opus 4.6 safety evaluations confirm continued low rates. However, Anthropic's harder test — where models must course-correct within already-sycophantic conversations — showed Opus 4.5 succeeded only 10% of the time, reflecting an intentional trade-off between warmth and pushback.
+:::
+
+<details><summary>References</summary>
+
+- Sharma, M. et al. (2024). "Towards Understanding Sycophancy in Language Models." ICLR 2024. [arxiv 2310.13548](https://arxiv.org/pdf/2310.13548)
+- "How RLHF Amplifies Sycophancy." (2026) [arxiv 2602.01002](https://arxiv.org/html/2602.01002)
+- "The Silicon Mirror: Dynamic Behavioral Gating for Anti-Sycophancy in LLM Agents." (2026) [arxiv 2604.00478](https://arxiv.org/html/2604.00478)
+- Anthropic (2025). "Protecting the wellbeing of our users." [anthropic.com](https://www.anthropic.com/news/protecting-well-being-of-users)
+- Bitterman, D.S. et al. (2025). "When helpfulness backfires: LLMs and the risk of false medical information due to sycophantic behavior." npj Digital Medicine. [nature.com](https://www.nature.com/articles/s41746-025-02008-z)
+
+
+
+### #5 Accumulated failure context {.tier2-bg}
+
+When prior attempts in a conversation have failed, output quality shifts toward "anything that works" over "the right approach." The context fills with errors and corrections, and generation gravitates toward whatever resolves the immediate failure rather than adhering to architectural rules. This is most visible in debugging loops where each failed attempt narrows the solution space to brute-force fixes.
+
+This is a specific instance of exposure bias in autoregressive models: the model conditions on its own prior (incorrect) outputs, drifting progressively further from the distribution of well-formed solutions it was trained on. Bengio et al. (2015) identified this core mechanism, and LeCun (2023) argued that conditioning on self-generated tokens causes cumulative distributional drift.
+
+**The classic framing overstates the problem for frontier models.** Research (arxiv 2505.24187, 2025) demonstrates that errors are not uniformly distributed but concentrated at sparse "key tokens" (5–10% of total tokens) representing critical decision junctions, and that models have significant self-correction capacity. The debugging spiral still occurs, but frontier models exit it more often than their predecessors. This is Tier 2 because the base mechanism is real and well-established, but self-correction partially compensates.
+
+::: {.callout-note icon=false}
+## Status — Opus 4.6
+
+**Partially mitigated.** Anthropic describes Opus 4.6 as planning more carefully, sustaining agentic tasks longer, and having "better code review and debugging skills to catch its own mistakes." The spiral still occurs when the initial approach is fundamentally wrong — self-correction helps with errors, not with bad architectural choices.
+:::
+
+<details><summary>References</summary>
+
+- Bengio, S. et al. (2015). "Scheduled Sampling for Sequence Prediction with Recurrent Neural Networks." NeurIPS.
+- LeCun, Y. (2023). "Why autoregressive language models are exponentially diverging and doomed." LinkedIn post. Discussed in [arxiv 2505.24187](https://arxiv.org/html/2505.24187v1)
+- "Beyond Exponential Decay: Rethinking Error Accumulation in Large Language Models." (2025) [arxiv 2505.24187](https://arxiv.org/html/2505.24187v1)
+- Anthropic (2026). "Introducing Claude Opus 4.6." [anthropic.com](https://www.anthropic.com/news/claude-opus-4-6)
+
+
+
+### #6 Tokenization and representation artifacts {.tier2-bg}
+
+Arithmetic errors, off-by-one mistakes in code, and failures in character-level string manipulation arise because the model operates on tokens, not on the semantic units humans assume it's working with. These failures are constant regardless of context length, but they become more consequential during extended tasks because they compound: a small arithmetic error in step 3 of a 12-step plan can silently corrupt everything downstream. This failure class is **mechanistically distinct** from all others in this document.
+
+Singh & Strouse (2024) demonstrated that tokenization choices directly impact arithmetic performance, with errors following stereotyped, systematic patterns that depend on how numbers are tokenized (left-to-right vs. right-to-left). Research on letter-counting tasks confirmed that errors correlate strongly with counting complexity, not word frequency — the limitation is representational rather than knowledge-based. The broader point is well-established: subword tokenization fragments numbers, dates, and character sequences into arbitrary chunks that obscure the positional structure required for precise manipulation.
+
+This is Tier 2 because the per-instance severity is low (individual errors are small) but the compounding across extended tasks is what makes it consequential.
+
+::: {.callout-note icon=false}
+## Status — Opus 4.6
+
+**No architectural fix; partial workaround via extended thinking.** The tokenization architecture has not changed in Opus 4.6. Extended thinking can partially compensate by working through arithmetic step-by-step, but this depends on the model recognizing that precise computation is needed. In extended agentic tasks, arithmetic is often embedded within larger flows where the model doesn't allocate thinking budget to it.
+:::
+
+<details><summary>References</summary>
+
+- Singh, A.K. & Strouse, D.J. (2024). "Tokenization counts: the impact of tokenization on arithmetic in frontier LLMs." [arxiv 2402.14903](https://arxiv.org/abs/2402.14903)
+- Penedo, A. et al. (2024). "Why Do Large Language Models Struggle to Count Letters?" [arxiv 2412.18626](https://arxiv.org/html/2412.18626v1)
+- "Say Anything but This: When Tokenizer Betrays Reasoning in LLMs." (2026) [arxiv 2601.14658](https://arxiv.org/html/2601.14658v1)
+
+
+
+### #7 Output length pressure {.tier2-bg}
+
+As a response grows longer, there is increasing pressure toward wrapping up — driven by sequence-level generation dynamics and training patterns around response length. This causes the model to cut corners on later steps of a multi-step task because the probability of conclusion-oriented tokens rises the longer the output runs.
+
+Research confirms that models show degraded self-assessment capability as output length increases, with longer texts exhibiting higher internal estimation errors. Research has also demonstrated that even when all relevant information is perfectly retrievable, the sheer length of the input alone degrades LLM reasoning performance by 13.9%–85%.
+
+When implementing multiple similar components in one session, the first few receive full attention to rules and patterns. Later items get progressively less rigorous — less thorough validation, reused types that don't quite fit, skipped decomposition steps. The user sees declining quality but may not notice because each item looks reasonable in isolation. This interacts with context window attenuation (#1) and instruction dilution (#2): as the context fills with prior items, the effective influence of the original rules diminishes, and the probability of conclusion-oriented shortcuts increases.
+
+::: {.callout-note icon=false}
+## Status — Opus 4.6
+
+128k max output tokens makes this more relevant, not less. Extended thinking may front-load planning before output generation begins, but there is no published evidence that adaptive thinking specifically mitigates late-output quality decline. The fundamental pressure toward conclusion tokens is a training artifact that persists.
+:::
+
+<details><summary>References</summary>
+
+- Yuan, W. et al. (2026). "Can LLMs Track Their Output Length?" [arxiv 2601.01768](https://arxiv.org/html/2601.01768)
+- Hu, Z. et al. (2024). "Explaining Length Bias in LLM-Based Preference Evaluations." [arxiv 2407.01085](https://arxiv.org/abs/2407.01085)
+- Modarressi, A. et al. (2025). "Context Length Alone Hurts LLM Performance Despite Perfect Retrieval." [arxiv 2510.05381](https://arxiv.org/html/2510.05381v1)
+
+
+
+## Tier 3 — Accelerants
+
+
+### #8 Approval momentum {.tier3-bg}
+
+When the user has approved several consecutive outputs without correction, the model's behavior drifts. A context filled with user approvals and no corrections shifts the probability distribution toward continuing the established pattern — including habits that happen to violate rules the user hasn't noticed being broken.
+
+It's important to note that this is **not a self-checking routine being "dialed down."** The model doesn't have a distinct verification step that gets suppressed. What's happening is standard context-conditional generation: the pattern of unchallenged outputs becomes part of the context that shapes the next output. The result looks like reduced vigilance, but the mechanism is just the same generation process responding to a context that contains no corrective signal. Research on sycophancy in multi-turn dialogues has shown that a model's willingness to reinforce patterns increases over multiple turns.
+
+This is the **primary accelerant for Tier 1 failures**: instruction dilution (#2) and context attenuation (#1) create the opening, and approval momentum locks in the drift.
+
+::: {.callout-note icon=false}
+## Status — Opus 4.6
+
+Sycophancy reduction targets explicit challenges (the model is less likely to flip its position when pushed back on). Approval momentum is about drift in the *absence* of pushback — contextual inertia, not people-pleasing. Different mechanism, limited overlap with sycophancy mitigations.
+:::
+
+<details><summary>References</summary>
+
+- Rennard, A. et al. (2024). Multi-turn sycophancy escalation. Cited in Malmqvist (2024), "Sycophancy in Large Language Models."
+
+
+
+### #9 Rule conflict resolution by path of least resistance {.tier3-bg}
+
+When two rules pull in opposite directions (e.g., "keep it simple" vs. "decompose complex logic"), the LLM follows whichever aligns with the path it's already on. This isn't principled precedence evaluation — it's that whichever rule has stronger activation given the current token sequence wins. The conflict doesn't surface as a decision point; the losing rule is simply never activated.
+
+Research on instruction hierarchies confirms that models exhibit highly inconsistent behavior when facing conflicting constraints, even with basic formatting conflicts like contradictory length requirements or capitalization rules. The system/user prompt separation that is supposed to enforce priority is largely ineffective — models resolve conflicts based on salience and recency rather than designated authority.
+
+::: {.callout-note icon=false}
+## Status — Opus 4.6
+
+No specific mitigation. The instruction hierarchy problem is active research but unresolved in production architectures.
+:::
+
+<details><summary>References</summary>
+
+- "Control Illusion: The Failure of Instruction Hierarchies in Large Language Models." (2025) [arxiv 2502.15851](https://arxiv.org/html/2502.15851v1)
+- Wallace, E. et al. (2024). "The Instruction Hierarchy: Training LLMs to Prioritize Privileged Instructions." [arxiv 2404.13208](https://arxiv.org/html/2404.13208v1)
+
+
+
+### #10 Explicit urgency signals {.tier3-bg}
+
+Phrases like "just make it work," "we need this now," or "skip the ceremony" cause architectural and style rules to be silently deprioritized. The LLM complies with the urgency framing and optimizes for task completion speed. This is arguably correct behavior (the user is the authority), but it means carefully written rules get dropped without acknowledgment. A single urgency phrase can undo an entire session's worth of careful prompting.
+
+Urgency signals are distinct from disagreement: the user isn't challenging the model, they're adjusting the priority. Instruction-following training encourages the model to comply with explicit priority changes, so this mode likely persists at full strength across model generations because compliance with user intent is a feature, not a bug — the problem is that constraint relaxation happens silently.
+
+::: {.callout-note icon=false}
+## Status — Opus 4.6
+
+Likely persists at full strength. Reduced sycophancy provides limited buffer because urgency operates through instruction-following, not people-pleasing. The model treats "skip the ceremony" as a legitimate directive.
+:::
+
+<details><summary>References</summary>
+
+- Sharma et al. (2024) and the broader sycophancy literature (see [#4](#pleasing-over-correctness) references) for the RLHF mechanism underlying urgency compliance.
+- ceaksan (2026). "LLM Behavioral Failure Modes: What Happens, Why, and What to Do." [ceaksan.com](https://ceaksan.com/en/llm-behavioral-failure-modes)
+
+
+
+### #11 False confidence after tool use {.tier3-bg}
+
+After successfully calling an API, reading a file, or receiving tool output, the model tends to over-trust the result and under-scrutinize it. A successful tool call creates a false sense of grounding — the model treats the returned data as more authoritative than it may be, and is less likely to validate, cross-check, or reconsider its approach. This compounds several of the above failure modes, particularly accumulated failure context (#5) and first-approach anchoring (#3).
+
+Each unscrutinized tool result strengthens the gravitational pull of the current approach. A tool result that appears to confirm the current approach makes reconsideration even less likely. If the tool result is wrong or incomplete, subsequent work builds on a flawed foundation.
+
+::: {.callout-note icon=false}
+## Status — Opus 4.6
+
+**More relevant for Opus 4.6 than for earlier models.** Opus 4.6 is specifically designed for extended agentic workflows with heavy tool use — multi-step tasks spanning multiple applications. The more tool calls in a session, the more opportunities for this bias to compound. Anthropic's emphasis on Opus 4.6's improved self-correction suggests awareness of this failure mode, but there is no published evaluation specifically measuring post-tool-call overconfidence in frontier models.
+:::
+
+<details><summary>References</summary>
+
+- ceaksan (2026). "LLM Behavioral Failure Modes: What Happens, Why, and What to Do." [ceaksan.com](https://ceaksan.com/en/llm-behavioral-failure-modes)
+- "11 Ways LLMs Fail in Production (With Academic Sources)." DEV Community (2026). [dev.to](https://dev.to/ceaksan/11-ways-llms-fail-in-production-with-academic-sources-4mf9)
+
+
+
+## Compounding
+
+
+### Interaction effects {.compound-bg}
+
+The most damaging failures emerge from compounding across tiers. Here are the most common compound patterns for frontier models in extended sessions.
+
+#### The long-session drift (most common) {.flow-title}
+
+```{mermaid}
+%%| fig-cap: "Context attenuation → instruction dilution → approval momentum"
+graph LR
+    A["<strong>#1</strong><br>Context attenuation<br>weakens rules"] --> B["<strong>#2</strong><br>Weakened rules<br>compete with patterns"] --> C["<strong>#8</strong><br>Approval momentum<br>locks in drift"]
+    style A fill:#ea580c,color:#fff,stroke:none
+    style B fill:#d97706,color:#fff,stroke:none
+    style C fill:#6d28d9,color:#fff,stroke:none
+```
+
+Context window attenuation weakens rule adherence over time. Instruction density dilution means the weakened rules compete with an increasingly large set of contextual patterns. Approval momentum fills the gap — in the absence of strong rule signals, the model defaults to whatever the user last accepted. By the end of a long session, behavior may bear little resemblance to the original system prompt. Opus 4.6's 1M context window and context compaction change the dynamics: the larger window means more conversation survives, but compaction introduces lossy compression of constraints. The drift pattern changes shape (less hard truncation, more gradual dilution) rather than disappearing.
+
+#### The debugging spiral {.flow-title}
+
+```{mermaid}
+%%| fig-cap: "Failed attempts → anchoring → superficial fixes"
+graph LR
+    A["<strong>#5</strong><br>Failed attempts<br>fill context"] --> B["<strong>#3</strong><br>Anchors to<br>broken approach"] --> C["<strong>#7</strong><br>Later fixes get<br>superficial"]
+    style A fill:#2563eb,color:#fff,stroke:none
+    style B fill:#16a34a,color:#fff,stroke:none
+    style C fill:#db2777,color:#fff,stroke:none
+```
+
+Accumulated failure context triggers first-approach anchoring — the model keeps trying to fix the current approach rather than reconsidering it. Output length pressure then causes later repair attempts to be increasingly superficial. If the user expresses frustration, pleasing bias (#4) kicks in and the model starts optimizing for "something that runs" over "something that's right." Opus 4.6's improved self-correction directly targets this spiral, but it still occurs when the initial approach is fundamentally wrong rather than just buggy — self-correction helps with errors, not with bad architectural choices.
+
+#### The urgency cascade {.flow-title}
+
+```{mermaid}
+%%| fig-cap: "Urgency signal → constraints dropped → drift accelerates"
+graph LR
+    A["<strong>#10</strong><br>'Just make<br>it work'"] --> B["<strong>#4</strong><br>Pleasing bias,<br>constraints dropped"] --> C["<strong>#8</strong><br>User approves,<br>drift accelerates"]
+    style A fill:#0369a1,color:#fff,stroke:none
+    style B fill:#0d9488,color:#fff,stroke:none
+    style C fill:#6d28d9,color:#fff,stroke:none
+```
+
+Explicit urgency signals activate pleasing bias, which accelerates approval momentum. The user says "just ship it," the model drops its constraints, produces something that looks like progress, the user approves, and the model treats approval as confirmation that the relaxed approach is correct. Each subsequent output drifts further from the original rules. In Opus 4.6, the reduced sycophancy baseline means this cascade starts from a lower floor, but urgency signals operate through instruction-following rather than people-pleasing.
+
+#### The tool-trust cascade {.flow-title}
+
+```{mermaid}
+%%| fig-cap: "Tool result accepted → anchoring reinforced → errors compound"
+graph LR
+    A["<strong>#11</strong><br>Tool result<br>accepted uncritically"] --> B["<strong>#3</strong><br>Anchoring<br>reinforced"] --> C["<strong>#6</strong><br>Small errors<br>compound downstream"]
+    style A fill:#059669,color:#fff,stroke:none
+    style B fill:#16a34a,color:#fff,stroke:none
+    style C fill:#d97706,color:#fff,stroke:none
+```
+
+False confidence after tool use feeds anchoring: a tool result that appears to confirm the current approach makes reconsideration even less likely. If the tool result is wrong or incomplete, subsequent work builds on a flawed foundation. This is uniquely relevant for Opus 4.6's agentic use cases where multi-step tool chains are the primary workflow.
+
+#### The batch decay spiral {.flow-title}
+
+```{mermaid}
+%%| fig-cap: "Quality degrades → approval locks pattern → errors accumulate"
+graph LR
+    A["<strong>#7</strong><br>Quality degrades<br>across items"] --> B["<strong>#8</strong><br>Approval locks in<br>degraded pattern"] --> C["<strong>#6</strong><br>Tokenization errors<br>accumulate"]
+    style A fill:#db2777,color:#fff,stroke:none
+    style B fill:#6d28d9,color:#fff,stroke:none
+    style C fill:#d97706,color:#fff,stroke:none
+```
+
+Quality degradation from output length pressure and instruction dilution produces subtly wrong outputs across repeated similar items. Approval momentum locks in the degraded pattern. Tokenization artifacts introduce small errors that accumulate. Opus 4.6's agent teams — independent Claude instances with separate context windows — are architecturally designed to break this spiral. This is the one interaction effect with a direct infrastructure-level mitigation.
+
+::: {.callout-note icon=false}
+## Opus 4.6 mitigations
+
+Self-correction helps exit the debugging spiral when the problem is a bug, not a wrong approach. Agent teams with separate context windows can break the batch decay pattern. Context compaction changes long-session drift from hard truncation to gradual dilution. None of these eliminate the compound patterns — they change their shape and reduce their severity.
+:::
+
+<details><summary>References</summary>
+
+- Hong, K. et al. (2025). "Context Rot." Chroma Research. [research.trychroma.com](https://research.trychroma.com/context-rot)
+- "Curse of Instructions." ICLR 2025. [openreview.net](https://openreview.net/forum?id=R6q67CDBCH)
+- "When 'Better' Prompts Hurt." (2026) [arxiv 2601.22025](https://arxiv.org/html/2601.22025v1)
+- Anthropic (2026). Claude Opus 4.6 documentation: agent teams, context compaction, adaptive thinking. [anthropic.com](https://www.anthropic.com/news/claude-opus-4-6)
+
+
+
+### Why adding more rules hurts {.compound-bg}
+
+Every rule you add to a system prompt increases instruction density dilution (#2), which makes every other failure mode slightly more likely to activate. This is the fundamental reason why "just add a rule for that" is often counterproductive as a mitigation strategy.
+
+The Curse of Instructions research quantifies this precisely: **success rate across all instructions follows a power-law relationship with instruction count.** This holds across model families, including frontier models. Even frontier models at the best end of the curve show meaningful degradation.
+
+These stacks explain why "just add more rules to the system prompt" is often counterproductive — more rules increase instruction density dilution (#2), which makes every other failure mode slightly more likely to activate.
+
+The answer is not more constraints. It's fewer, better-placed constraints — at the edges of the context window where attention is strongest — combined with architectural mitigations:
+
+**Start fresh contexts** when you notice drift rather than trying to correct mid-session. **Use agent teams** with separate context windows for batch work. **Put critical rules at the start and end** of system prompts, never buried in the middle. **Validate tool outputs explicitly** rather than trusting them as grounding. **Recognize urgency phrases** as constraint-relaxation events and re-state constraints after using them.
+
+::: {.callout-tip icon=false}
+## Key takeaway
+
+For frontier models, the dominant failure modes are about context management, not generation quality. The model is smart enough — the problem is that your instructions, constraints, and accumulated context are competing for attention in a finite window with non-uniform influence. Design for that.
+:::
+
+<details><summary>References</summary>
+
+- "Curse of Instructions: Large Language Models Cannot Follow Multiple Instructions at Once." ICLR 2025. [openreview.net](https://openreview.net/forum?id=R6q67CDBCH)
+- "When 'Better' Prompts Hurt: Evaluation-Driven Iteration for LLM Applications." (2026) [arxiv 2601.22025](https://arxiv.org/html/2601.22025v1)
+

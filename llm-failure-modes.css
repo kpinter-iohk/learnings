@@ -1,0 +1,120 @@
+/* Tier tags */
+.tag {
+  display: inline-block;
+  font-size: 0.8em;
+  font-weight: 700;
+  padding: 3px 12px;
+  border-radius: 5px;
+  margin-right: 4px;
+  color: #fff;
+}
+.tag.tier1 { background: #ea580c; }
+.tag.tier2 { background: #0d9488; }
+.tag.tier3 { background: #6d28d9; }
+
+/* Per-section colored boxes — rainbow progression */
+#context-window-attenuation,
+#instruction-density-dilution,
+#first-approach-anchoring,
+#pleasing-over-correctness,
+#accumulated-failure-context,
+#tokenization-and-representation-artifacts,
+#output-length-pressure,
+#approval-momentum,
+#rule-conflict-resolution-by-path-of-least-resistance,
+#explicit-urgency-signals,
+#false-confidence-after-tool-use,
+#interaction-effects,
+#why-adding-more-rules-hurts {
+  padding: 2em 2.2em !important;
+  border-radius: 12px;
+  margin: 1.5em 0;
+  border-left: 5px solid var(--accent);
+  background: var(--bg) !important;
+}
+
+#context-window-attenuation       { --bg: #fef2f2; --accent: #dc2626; }
+#instruction-density-dilution     { --bg: #fff7ed; --accent: #ea580c; }
+#first-approach-anchoring         { --bg: #fffbeb; --accent: #d97706; }
+#pleasing-over-correctness        { --bg: #fefce8; --accent: #65a30d; }
+#accumulated-failure-context      { --bg: #f0fdf4; --accent: #16a34a; }
+#tokenization-and-representation-artifacts { --bg: #f0fdfa; --accent: #0d9488; }
+#output-length-pressure           { --bg: #ecfeff; --accent: #0891b2; }
+#approval-momentum                { --bg: #f0f9ff; --accent: #0284c7; }
+#rule-conflict-resolution-by-path-of-least-resistance { --bg: #eff6ff; --accent: #2563eb; }
+#explicit-urgency-signals         { --bg: #eef2ff; --accent: #4f46e5; }
+#false-confidence-after-tool-use  { --bg: #f5f3ff; --accent: #7c3aed; }
+#interaction-effects              { --bg: #fdf2f8; --accent: #db2777; }
+#why-adding-more-rules-hurts      { --bg: #fff1f2; --accent: #be123c; }
+
+/* Heading inherits accent color for the left border */
+#context-window-attenuation h3,
+#instruction-density-dilution h3,
+#first-approach-anchoring h3,
+#pleasing-over-correctness h3,
+#accumulated-failure-context h3,
+#tokenization-and-representation-artifacts h3,
+#output-length-pressure h3,
+#approval-momentum h3,
+#rule-conflict-resolution-by-path-of-least-resistance h3,
+#explicit-urgency-signals h3,
+#false-confidence-after-tool-use h3,
+#interaction-effects h3,
+#why-adding-more-rules-hurts h3 {
+  margin-top: 0;
+}
+
+/* Flow diagram sub-headers */
+.flow-title {
+  font-size: 1.05em;
+  margin-top: 2em;
+}
+
+/* Softer callout styling for status boxes — inherit section accent */
+div.callout {
+  margin-top: 1.5em;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.7) !important;
+  border-left-color: var(--accent, #888) !important;
+}
+div.callout .callout-header {
+  background: rgba(255,255,255,0.4) !important;
+}
+div.callout .callout-icon {
+  color: var(--accent, #888) !important;
+}
+
+/* References sections */
+details {
+  margin-top: 1.5em;
+  max-width: 660px;
+}
+details summary {
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0.55;
+}
+details ul {
+  padding-left: 1.2em;
+  margin-top: 0.5em;
+}
+details li {
+  font-size: 0.85em;
+  line-height: 1.55;
+  margin-bottom: 0.4em;
+  opacity: 0.75;
+}
+
+/* Mermaid diagram sizing */
+.mermaid {
+  margin: 1.5em 0;
+}
+
+/* Constrain body width for readability */
+.content p,
+.content li {
+  max-width: 660px;
+}
