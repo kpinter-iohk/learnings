@@ -4,3 +4,4 @@ toc: false
 ---
 
 - [LLM Failure Modes During Extended Task Execution](llm-failure-modes.qmd)
+- [Claude Code's Three Models — Haiku, Sonnet, Opus](claude-code-models.qmd)

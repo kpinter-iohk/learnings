@@ -1,0 +1,126 @@
+/* Model tags */
+.tag {
+  display: inline-block;
+  font-size: 0.8em;
+  font-weight: 700;
+  padding: 3px 12px;
+  border-radius: 5px;
+  margin-right: 4px;
+  color: #fff;
+}
+.tag.haiku  { background: #0891b2; }
+.tag.sonnet { background: #16a34a; }
+.tag.opus   { background: #7c3aed; }
+
+/* Per-section colored boxes */
+#haiku,
+#sonnet,
+#opus,
+#cost-vs-capability,
+#what-we-don-t-know,
+#how-claude-code-uses-the-tiers,
+#choosing-a-tier,
+#unknowns,
+#claude-code,
+#cost,
+#choosing,
+#in-practice,
+#tokens-appendix {
+  padding: 2em 2.2em !important;
+  border-radius: 12px;
+  margin: 1.5em 0;
+  border-left: 5px solid var(--accent);
+  background: var(--bg) !important;
+}
+
+#haiku       { --bg: #ecfeff; --accent: #0891b2; }
+#sonnet      { --bg: #f0fdf4; --accent: #16a34a; }
+#opus        { --bg: #f5f3ff; --accent: #7c3aed; }
+#cost        { --bg: #fff7ed; --accent: #ea580c; }
+#unknowns    { --bg: #f0fdfa; --accent: #0d9488; }
+#claude-code { --bg: #eef2ff; --accent: #4f46e5; }
+#choosing    { --bg: #fdf2f8; --accent: #db2777; }
+#in-practice { --bg: #fffbeb; --accent: #d97706; }
+#tokens-appendix      { --bg: #fefce8; --accent: #ca8a04; }
+
+/* Heading inherits accent color */
+#haiku h2,
+#sonnet h2,
+#opus h2,
+#cost h2,
+#unknowns h2,
+#claude-code h2,
+#choosing h2,
+#in-practice h2,
+#tokens-appendix h2 {
+  margin-top: 0;
+}
+
+/* Comparison table */
+.spec-table {
+  font-size: 0.92em;
+  margin: 1.5em 0;
+}
+.spec-table th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+.spec-table td:first-child,
+.spec-table th:first-child {
+  font-weight: 600;
+  white-space: nowrap;
+  background: #fafafa;
+}
+.spec-table .haiku-col  { background: rgba(8, 145, 178, 0.04); }
+.spec-table .sonnet-col { background: rgba(22, 163, 74, 0.04); }
+.spec-table .opus-col   { background: rgba(124, 58, 237, 0.04); }
+
+/* Softer callout styling — inherit section accent */
+div.callout {
+  margin-top: 1.5em;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.7) !important;
+  border-left-color: var(--accent, #888) !important;
+}
+div.callout .callout-header {
+  background: rgba(255,255,255,0.4) !important;
+}
+div.callout .callout-icon {
+  color: var(--accent, #888) !important;
+}
+
+/* References sections */
+details {
+  margin-top: 1.5em;
+  max-width: 660px;
+}
+details summary {
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0.55;
+}
+details ul {
+  padding-left: 1.2em;
+  margin-top: 0.5em;
+}
+details li {
+  font-size: 0.85em;
+  line-height: 1.55;
+  margin-bottom: 0.4em;
+  opacity: 0.75;
+}
+
+/* Constrain body width for readability */
+.content p,
+.content li {
+  max-width: 660px;
+}
+
+/* Inline code in tables shouldn't wrap awkwardly */
+table code {
+  font-size: 0.88em;
+  white-space: nowrap;
+}

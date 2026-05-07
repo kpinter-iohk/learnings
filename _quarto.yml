@@ -10,6 +10,8 @@ website:
     left:
       - href: llm-failure-modes.qmd
         text: LLM Failure Modes
+      - href: claude-code-models.qmd
+        text: Claude Code Models
 
 format:
   html:

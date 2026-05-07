@@ -1,0 +1,592 @@
+---
+title: "Claude Code's Three Models"
+subtitle: "Haiku, Sonnet, Opus — what they cost, what they're for, and how Claude Code uses them (Q2 2026)"
+toc: true
+toc-depth: 3
+toc-title: "Sections"
+number-sections: false
+css: claude-code-models.css
+bibliography: references.bib
+csl: https://www.zotero.org/styles/ieee
+link-citations: true
+citations-hover: true
+nocite: '@*'
+format:
+  html:
+    page-layout: article
+    smooth-scroll: true
+---
+
+## Overview
+
+Claude Code defaults to one of three Claude model tiers — Haiku, Sonnet, or Opus — and lets you switch between them with `/model`. The list price gap from cheapest to most expensive is **5×**. The SWE-bench Verified gap on hard coding tasks is **roughly 14 percentage points** (Haiku 73.3% averaged over 50 trials with a 128K thinking budget, Opus 87.6% under different reporting conditions — directional, not measurement-equivalent). The cheaper tier is not five times worse; the more expensive tier is not five times better. Picking the right tier is about matching task difficulty to capability — and the differences are concrete enough to demonstrate, not just describe.
+
+Most Claude Code users default to whichever tier their plan gives them. That's a decent first approximation but a bad steady state — the cost curve isn't linear, the capability curve isn't either, and the work the harness does in the background (subagents, the `haiku` alias, `opusplan`, `/fast`) routes through tiers you didn't pick. This article maps each tier's actual capability and cost as of Q2 2026 — Haiku 4.5, Sonnet 4.6, Opus 4.7 — shows the differentiation pattern in concrete prompts, and ends with a contrarian default: pick Sonnet, escalate to Opus deliberately, and let Haiku take the parallel work. Where Anthropic doesn't publish a number — most notably parameter counts — that's flagged explicitly rather than filled in with speculation.
+
+[Haiku 4.5]{.tag .haiku} fastest, cheapest, 200K context, parallel-worker tier
+
+[Sonnet 4.6]{.tag .sonnet} default for most users, up to 1M context, best speed/intelligence balance
+
+[Opus 4.7]{.tag .opus} most capable, up to 1M context, long-horizon agentic work
+
+## Cost levers {#cost-levers}
+
+List price is rarely a useful predictor of real per-task cost. Caching, batching, geographic routing, and Opus 4.7's new tokenizer each move per-task cost more than tier choice does on the workloads where they apply. The deeper mechanics — what a token actually is, why output costs more than input, how prefill and decode work — are in the [appendix](#tokens-appendix) for readers who want them.
+
+### Prompt caching
+
+Anthropic offers a caching layer that persists **across requests** — prompt caching — and it's the single largest lever on Claude Code economics. (The per-request KV-cache that decode relies on is a separate mechanism, covered in the [appendix](#tokens-appendix).)
+
+The mechanic:
+
+- **Cache writes** store a prefix for future use. They cost **1.25× base input price** for a 5-minute TTL or **2× base input price** for a 1-hour TTL.
+- **Cache reads** match a prefix that's already cached and bill at **10% of base input price** — $0.10/MTok on Haiku, $0.30/MTok on Sonnet, $0.50/MTok on Opus.
+- Caching is opt-in: you mark cacheable boundaries with `cache_control` breakpoints in the API request. Up to **4** explicit breakpoints per request, with a **20-block lookback window** that the cache uses when matching a prefix.
+- The minimum cacheable prefix is **4,096 tokens** for Opus and Haiku, **2,048 tokens** for Sonnet 4.6. Below the minimum, caching silently doesn't apply.
+- Any change to a cached prefix invalidates that level and everything after it; the cache is keyed by exact byte match of the prefix.
+
+What gets cached in Claude Code: the harness's system prompt, tool definitions, slash command definitions, MCP server schemas, and large file contents that the model reads repeatedly. These are typically tens of thousands of identical input tokens across consecutive turns of a session.
+
+The arithmetic this enables is dramatic. A 50,000-token cached prefix costs $0.005 to read on Haiku, $0.015 on Sonnet, $0.025 on Opus. Over 100 turns reading the same prefix, that's $0.50 / $1.50 / $2.50 for the cached portion total — versus $5 / $15 / $25 if every turn paid the full input rate. The first turn pays a one-time write cost (1.25× base input for 5-minute TTL: about $0.06 / $0.19 / $0.31 for that 50K-token prefix) which amortizes within a few reads.
+
+The implication: **real per-task cost depends much more on cache hit rate than on which tier you're using.** A Claude Code session that thrashes the cache will be much more expensive than the same model running cache-friendly workloads.
+
+#### What this means in practice
+
+- **Long sessions amortize the cache write; short sessions pay it each time.** The API's default TTL is 5 minutes; a 1-hour TTL is opt-in and costs 2× on writes [@anthropic-prompt-caching]. Idle past the TTL and the next message re-pays the write for everything in your project context.
+- **`/clear` starts a fresh conversation with empty context** [@anthropic-cc-commands]. The static prefix (system prompt, tool definitions) stays the same and can still cache-hit; only the conversation prefix becomes empty.
+- **`/compact` summarizes the conversation tail; the static prefix is preserved.** Per the docs, the system prompt is unchanged and CLAUDE.md, auto memory, and MCP tools reload automatically from disk on `/compact` [@anthropic-cc-context-window]. The conversation history is replaced by a summary by design, so the messages-level prefix is invalidated; the static prefix still cache-hits if the on-disk files haven't changed.
+- **Editing CLAUDE.md mid-session does NOT take effect until next session or `/compact`.** Claude Code reads CLAUDE.md at session launch and re-injects it from disk on `/compact` [@anthropic-cc-memory]; there is no documented mid-session re-read. If you want new rules applied, start a new session or run `/compact`.
+- **Toggling `/fast` mid-session is expensive.** The fast-mode docs say plainly: "you pay the full fast mode uncached input token price for the entire conversation context" [@anthropic-fast-mode]. Enable `/fast` at session start, not mid-flight.
+- **Reading new files extends the cached prefix; it doesn't reset it.** The cache point moves forward with each request — previous content reads from cache, new content writes new entries [@anthropic-prompt-caching].
+- **Named subagents have their own cache; forks share the parent's.** Claude Code's docs explicitly contrast the two [@anthropic-cc-subagents]: forks reuse the parent's prompt cache because their system prompt and tools are identical, while named subagents pay a fresh cache write. For workloads that spawn many short-lived agents, forks are meaningfully cheaper.
+- **Other byte changes to cached layers invalidate from that point onward.** Per the API's exact-prefix rule, "changes at each level invalidate that level and all subsequent levels" [@anthropic-prompt-caching] — so adding or removing an MCP server changes the tool-definitions block and invalidates downstream cache.
+
+The contrarian habit: keep sessions long. "Fresh session per task" sounds like hygiene but burns the cache. Break sessions when context bleed starts confusing the model (see [first-approach anchoring](llm-failure-modes.qmd#first-approach-anchoring)), not when the session feels long.
+
+### Other cost levers worth knowing about
+
+A few smaller knobs that move per-task cost meaningfully:
+
+- **Batch API discount.** Anthropic's Batch API processes async jobs at **50% of base price** across input, output, and cache operations. For workloads that can tolerate batched processing — overnight evals, data labeling, bulk classification — this is a bigger lever than tier choice. A Batch-API call on Opus is half the price of a real-time call on Opus.
+- **Geographic-routing premium.** Setting `inference_geo: us-only` on Opus 4.7, Opus 4.6, and newer models routes inference to US-only datacenters at a **10% pricing premium**. For data-residency-sensitive workloads, this is a real cost factor; for everyone else, it's a no-op.
+- **`task_budget` (Opus 4.7 beta).** An advisory cap on total tokens consumed across an agentic loop, minimum 20K. Lets the model self-moderate spend across a long-running task. Anthropic warns that overly tight budgets can cause the model to complete tasks less thoroughly or refuse them entirely — `max_tokens` is the cheapest way to *cap* costs, `task_budget` is the cheapest way to make Opus *self-moderate*; they're different tools.
+
+## Specs at a glance
+
+::: {.spec-table}
+
+|  | Haiku 4.5 | Sonnet 4.6 | Opus 4.7 |
+|---|---|---|---|
+| API ID | `claude-haiku-4-5` | `claude-sonnet-4-6` | `claude-opus-4-7` |
+| Released | Oct 15, 2025 | Feb 17, 2026 | Apr 16, 2026 |
+| Context window | 200K tokens | 1M tokens* | 1M tokens* |
+| Max output (standard) | 64K tokens | 64K tokens | 128K tokens |
+| Knowledge cutoff (reliable) | Feb 2025 | Aug 2025 | Jan 2026 |
+| Input | $1 / MTok | $3 / MTok | $5 / MTok |
+| Output | $5 / MTok | $15 / MTok | $25 / MTok |
+| Cache read | $0.10 / MTok | $0.30 / MTok | $0.50 / MTok |
+| Cache write (5m / 1h) | $1.25 / $2 | $3.75 / $6 | $6.25 / $10 |
+| Extended thinking (`budget_tokens` API) | Yes | Yes | **Removed** |
+| Adaptive thinking | No | Yes | Yes (the only thinking-on mode) |
+| Comparative latency | Fastest | Fast | Moderate |
+| Long-context premium | n/a | None | None |
+
+:::
+
+\* Maximum supported context window. Actual usable context in Claude Code depends on plan and model alias — see [Default model per plan](#default-model-per-plan) and [`/model` aliases](#model-aliases). Plain `opus` is auto-upgraded to 1M only on Max / Team / Enterprise plans; Sonnet's 1M requires the explicit `[1m]` alias.
+
+All three tiers support text + image input, tool use, computer use, prompt caching, batch API, and the Priority Tier. Tool-use system-prompt overhead is identical across all three (346 tokens with `auto`/`none` choice, 313 tokens with `any`/`tool`) [@anthropic-models-overview; @anthropic-pricing].
+
+## Same prompt, three responses {#in-practice}
+
+Benchmarks compress capability into a single number. To see how the gap might present in real prompts, here are six small comparisons. Each prompt was sent to Haiku 4.5, Sonnet 4.6, and Opus 4.7 via isolated subagents in the same harness — no shared conversation context, no tool use, identical user-prompt text, only the underlying model varied. **This is anecdotal: n=1 per cell, no seeds or temperature controls (Opus 4.7 doesn't accept temperature anyway), six prompts in a narrow Python/coding domain.** The qualitative differentiation patterns shown below are illustrative for thinking about *how* the tiers might differ; whether any specific finding generalizes requires a real eval. Output substance is verbatim where I quote it; format is paraphrased for length.
+
+<details><summary>Methodology details</summary>
+
+All six prompts were dispatched on May 5–6, 2026 from Claude Code v2.1 via the Agent tool with `subagent_type=general-purpose` and `model` overrides for the three tiers. Effort levels were left at the harness defaults: `xhigh` for Opus 4.7, `high` for Sonnet 4.6, default for Haiku 4.5. Each prompt was invoked once per tier with no shared context, no tool use, and identical user-prompt text. Token counts are from each agent's bundled `usage.total_tokens` (input + output + thinking, not separable from the harness side); latency is wall-clock duration from agent invocation to completion, as reported by the harness.
+
+The four code/design prompts shown below are quoted verbatim. The two narrower-differentiation probes were:
+
+- (HTTP retry) — *"Write a Python function that retries a flaky HTTP request up to 3 times with exponential backoff, only retrying on 5xx and connection errors."*
+- (Concurrency tradeoff) — *"When should I use multiprocessing vs threading vs asyncio in Python?"*
+
+Per-prompt token counts and Haiku/Sonnet ratios:
+
+| Prompt | Haiku 4.5 | Sonnet 4.6 | Opus 4.7 | H/S ratio |
+|---|---|---|---|---|
+| `is_business_email` review | 22,204 | 8,820 | 12,407 | 2.52× |
+| Rate limiting design | 22,221 | 8,657 | 12,058 | 2.57× |
+| `process_order` refactor | 22,612 | 8,891 | 12,365 | 2.54× |
+| `get_user_balance` review | 22,132 | 8,679 | 12,039 | 2.55× |
+| HTTP retry implementation | 22,347 | 8,664 | 12,135 | 2.58× |
+| Concurrency tradeoff | 22,254 | 8,702 | 12,168 | 2.56× |
+| **Mean** | **22,295** | **8,736** | **12,195** | **2.55×** |
+
+The H/S ratio range is 2.52×–2.58× — within ±2.4% of the mean.
+
+</details>
+
+### A code review where the issues exist at multiple levels
+
+Given the function:
+
+```python
+def is_business_email(email):
+    """Returns True if email is from a business domain (not a free webmail)."""
+    free_domains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com']
+    domain = email.split('@')[1]
+    return domain not in free_domains
+```
+
+| Issue | Haiku 4.5 | Sonnet 4.6 | Opus 4.7 |
+|---|:---:|:---:|:---:|
+| `IndexError` on missing `@` | ✓ | ✓ | ✓ |
+| Case sensitivity | ✓ | ✓ | ✓ (cites RFC 5321) |
+| Incomplete blocklist | ✓ | ✓ | ✓ (lists `googlemail.com`, regional TLDs) |
+| Empty-string crash | — | ✓ | ✓ |
+| Subdomain bypass (`mail.gmail.com`) | — | ✓ | ✓ |
+| **Multi-`@` security bypass** | — | ✓ | ✓ (suggests `rsplit('@', 1)[1]`, cites RFC 5321 quoted local parts) |
+| Whitespace / display-name handling | — | — | ✓ |
+| Non-string / `None` input | — | — | ✓ |
+| **Total catches** | **3** | **6** | **8** |
+
+The point isn't that Haiku is wrong — its three findings are correct. What's visible in this single comparison is **more catches per review** at the higher tiers, including the security-relevant ones. The multi-`@` bypass (`user@attacker.com@gmail.com` parses as `attacker.com` under `split('@')[1]`) is a real vulnerability — Haiku didn't see it on this run.
+
+### Architectural depth — production gotchas
+
+Asked "I'm adding rate limiting to a Flask API. What's the right approach?" all three correctly recommend `Flask-Limiter` with Redis. The differentiation is downstream:
+
+- **Haiku** gives a complete recipe with code, lists key decisions (storage, key function, strategy), ends generic: "monitor and adjust."
+- **Sonnet** adds operational specifics: auth-based keys ("harder to abuse"), the `Retry-After` header on 429s, gateway-level alternatives (nginx, Kong, AWS API Gateway).
+- **Opus** in this trial surfaced production gotchas the other two missed: `ProxyFix` ("behind a proxy, configure ProxyFix or you'll rate-limit your load balancer's IP"), `fixed-window` vs `moving-window` strategy tradeoff with cost reasoning, direct stance ("Redis is non-negotiable" for multi-instance).
+
+Of the three responses, only Opus named the specific failure mode (`ProxyFix`) that would silently make rate limiting useless in a real deployment.
+
+### Questioning the question — when the obvious problem isn't the real one
+
+Asked "this function has gotten too big, what's the right decomposition?" given a 20-line `process_order` doing validation → stock check → discount → Stripe charge → ship → email:
+
+```python
+def process_order(order):
+    if not order.user_id: raise ValueError("no user")
+    if not order.items: raise ValueError("empty order")
+    for item in order.items:
+        stock = db.query(f"SELECT qty FROM stock WHERE item={item.id}").first()
+        if stock < item.qty: raise OutOfStock(item.id)
+    if order.user.tier == 'vip': order.total *= 0.9
+    elif order.coupon_code:
+        coupon = db.query(f"SELECT * FROM coupons WHERE code={order.coupon_code}").first()
+        order.total *= (1 - coupon.discount)
+    payment = stripe.charge(order.user.card, order.total)
+    if not payment.success: raise PaymentFailed
+    fulfillment.ship(order)
+    email_user(order.user, order)
+    return order
+```
+
+- **Haiku** decomposes into six functions cleanly: `validate_order`, `check_stock_availability`, `apply_discounts`, `process_payment`, `fulfill_order`, plus an orchestrator. Mechanical, complete, gets the job done.
+- **Sonnet** also decomposes (4 functions, grouping payment/ship/email under `charge_and_fulfill` because they share failure semantics), and adds two operational catches the question didn't ask about: SQL injection in the f-string queries, and the N+1 query that becomes obviously batchable once `check_inventory` is isolated.
+- **Opus** decomposes the same way as Sonnet, then **says the decomposition is the wrong frame**:
+
+  > "`charge_and_fulfill` is the real problem. Charge succeeds, then `ship` or `email_user` throws — you've taken money and not shipped. That's a transactional concern (outbox, saga, or at minimum compensating refund), not a decomposition concern. Splitting it into smaller functions hides this rather than fixing it. The decomposition is easy. The atomicity bug is what a senior reviewer will flag."
+
+Three responses to the same prompt: a clean refactor, a refactor plus security/perf catches, and a refactor plus a flag that the question itself is wrong. In this trial, only Opus pushed back on the framing.
+
+### Domain inference at the variable level
+
+A smaller scale of the same pattern. Asked to review:
+
+```python
+def get_user_balance(user_id, db):
+    cursor = db.cursor()
+    cursor.execute(f"SELECT balance FROM users WHERE id = {user_id}")
+    row = cursor.fetchone()
+    return row[0] if row else 0
+```
+
+All three caught the SQL injection, the cursor leak, and the magic-zero return. The notable difference in this trial: **only Opus inferred the domain** from the function name `get_user_balance` and flagged that "if `balance` is stored as a float, monetary values should use `Decimal` to avoid rounding errors." None of the other tiers reasoned about the function's purpose — they reviewed it as generic code.
+
+### Two probes with narrower differentiation
+
+Two more prompts produced narrower gaps. **Concrete code generation** ("write a Python function that retries a flaky HTTP request up to 3 times with exponential backoff, only retrying on 5xx and connection errors") and **tradeoff explanation** ("when should I use multiprocessing vs threading vs asyncio?"). All three tiers gave correct, working answers. Opus's marginal contribution in those was production polish: jitter to avoid thundering-herd retries on the HTTP prompt, and a mention of Python 3.13's experimental free-threaded build (PEP 703) on the concurrency prompt. Useful, but not the kind of gap that justifies the price tier on those task shapes.
+
+### What this demonstrates
+
+Across these six prompts, two patterns appeared consistently:
+
+- **Sonnet's apparent marginal value was operational.** Sonnet's responses routinely caught secondary concerns: SQL injection in passing, N+1 queries to batch, security-relevant edge cases the user didn't ask about. The framing felt like "what else should we fix while we're here?"
+- **Opus's apparent marginal value was inferential.** Its responses inferred domain (`balance` is monetary, so `Decimal`), named specific failure modes (`ProxyFix`), pushed back on framing (decomposition isn't the real problem in `process_order`), and brought ecosystem awareness (PEP 703, jitter for thundering herd). The framing felt like "is this the right question?"
+
+If those patterns generalize beyond these prompts, they'd suggest: when the task is well-specified, Sonnet is enough; when the task requires the model to reason about *what kind of problem this actually is*, Opus's gap shows. **With six prompts and one trial each, the patterns are anecdotal** — they're directionally consistent with Anthropic's tier positioning and with the ~14-point SWE-bench gap, but six rolls of three dice can't tell you whether the patterns are real.
+
+::: {.callout-note icon=false}
+#### Sidebar — bundled token totals probably aren't measuring the model
+
+Across all six prompts, total token usage was strikingly consistent — almost suspiciously so. Haiku totals clustered in 22,100–22,600 across very different prompts; Sonnet in 8,650–8,890; Opus in 12,000–12,400. With prompt content varying from a 13-line Python function to an open-ended tradeoff question, that flatness is a tell: model-driven variation is a small fraction of the bundled total.
+
+The most likely explanation is **harness-side scaffolding** — the agent system prompt, tool definitions, MCP schemas, and other invariant context — dominating the `usage.total_tokens` figure. Each tier may also run inside a slightly different harness wrapper (different effort levels, different default behaviors, different system-prompt verbosity), and the 2.5× Haiku-to-Sonnet "gap" is more plausibly an artifact of those wrappers than a property of the models themselves.
+
+The honest takeaway is the inverse of what I originally drafted here: **bundled token totals from a subagent harness are not a clean signal of model behavior, and they're not a clean signal of cost.** The disaggregated `input_tokens` / `cache_read_input_tokens` / `output_tokens` breakdown — which the bundled accounting hides — would settle either question. The flat-per-tier numbers above are a useful caution, not a finding to act on.
+:::
+
+## Haiku 4.5 — speed and parallelism {#haiku}
+
+Haiku is the worker tier. Anthropic positions it for "real-time, low-latency tasks like chat assistants, customer service agents, or pair programming," and explicitly as the executor in multi-agent orchestration where Sonnet plans and "a team of multiple Haiku 4.5s" carries out the work in parallel [@anthropic-haiku-4-5].
+
+Two cost claims from the announcement are worth pulling apart, because they have different baselines: a partner testimonial (Augment, quoted in Anthropic's announcement) reports Haiku 4.5 at "**90% of Sonnet 4.5's performance**" on Augment's internal agentic coding eval, while Anthropic's own headline framing positions Haiku 4.5 as **one-third the cost and more than twice the speed of Sonnet 4** — the previous-generation Sonnet, not Sonnet 4.5 [@anthropic-haiku-4-5]. On SWE-bench Verified, Haiku 4.5 scores **73.3%** averaged over 50 trials with a 128K thinking budget. Anthropic also states that Haiku 4.5 "even surpasses Claude Sonnet 4 at certain tasks, like using computers," though the announcement doesn't publish per-benchmark numbers for OSWorld or Terminal-Bench.
+
+What you give up vs. Sonnet:
+
+- **Context window: 200K tokens, not 1M.** This is the only hard ceiling that separates Haiku from the larger tiers. For a typical Claude Code session this is plenty; for long-horizon agentic work spanning thousands of tool calls and large file dumps, it isn't.
+- **No adaptive thinking.** Haiku 4.5 supports extended thinking with an explicit budget but does not automatically scale thinking based on task difficulty.
+- **Lower ceiling on reasoning-heavy tasks.** GPQA Diamond, ARC-AGI, hard agentic chains — Sonnet and especially Opus pull ahead on the upper end.
+
+Haiku 4.5 is classified at ASL-2 in Anthropic's Responsible Scaling Policy [@anthropic-haiku-system-card], while Sonnet 4.5/4.6 and Opus 4.5/4.6 are at ASL-3 [@anthropic-sonnet-system-card]. Opus 4.7's ASL classification was not stated in the announcement or what's-new page at time of writing. The classification is about deployment safety — what the model can and can't be uplifted to do for misuse — not capability.
+
+::: {.callout-note icon=false}
+#### When Haiku is the right call
+
+Background tasks where latency matters more than ceiling intelligence: code-search subagents, classification, summarization, file-reading, formatting passes. Anything that runs N times in parallel where the per-call cost dominates. The Claude Code harness uses a Haiku-tier model for background functionality (and to resolve the `haiku` alias) via `ANTHROPIC_DEFAULT_HAIKU_MODEL`; subagent model selection is a separate setting (`CLAUDE_CODE_SUBAGENT_MODEL`).
+:::
+
+
+## Sonnet 4.6 — production default {#sonnet}
+
+Sonnet is the default on Pro and Team Standard plans. On Enterprise pay-as-you-go and the Anthropic API, Opus 4.7 was scheduled to replace Sonnet 4.6 as the default on April 23, 2026 [@anthropic-model-config]; the docs continue to describe the change as forthcoming, so the cutover may have lagged the announced date — verify on your own account. Either way, Pro is the largest plan tier and Sonnet 4.6 is the model most Claude Code users are actually running.
+
+Sonnet is the most under-credited tier in this lineup. Anthropic positions it as the speed/intelligence balance tier built for daily production work — which sounds like ad copy until you read their own preference data: users picked Sonnet 4.6 over **Opus 4.5** in **59% of head-to-head comparisons**, and over Sonnet 4.5 roughly **70% of the time** [@anthropic-sonnet-4-6]. For typical Claude Code tasks, Sonnet 4.6 was at parity-or-better with the previous Opus generation, at one-third the price. The case for staying on Sonnet by default is empirical, not aspirational.
+
+The launch benchmarks confirm the positioning:
+
+- **SWE-bench Verified: 79.6%** (80.2% with prompt modification)
+- **Terminal-Bench 2.0: ~59.1%**
+- **OSWorld-Verified: 72.5%**
+- **GPQA Diamond: 74.1%** — note this is ~17 points below Opus 4.6's 91.3%, the largest single-benchmark gap between the tiers and a useful "when to escalate" signal for hard scientific reasoning.
+- **τ2-bench Telecom: 97.9%, τ2-bench Retail: 91.7%**
+- **Insurance benchmark (Pace): 94%** — Anthropic called this its "highest-performing model… for computer use" at Sonnet 4.6's Feb 2026 launch [@anthropic-sonnet-4-6]; Opus 4.7 has since posted a higher OSWorld score (78.0% vs Sonnet 4.6's 72.5%).
+
+Sonnet sits between the other two tiers in obvious ways (200K → 1M context window, no adaptive thinking → adaptive thinking) and one non-obvious one: like Haiku 4.5, it still supports **extended thinking with explicit `budget_tokens`**, which Opus 4.7 removed entirely [@anthropic-whats-new-4-7]. If you have code that pins thinking budget, it works on Sonnet 4.6 and Haiku 4.5 and breaks on Opus 4.7. The "smaller tiers support an interface the larger tier doesn't" inversion is unusual; if you depend on bounded thinking budgets, Opus 4.7 is the only current tier that doesn't give you them.
+
+::: {.callout-note icon=false}
+#### When Sonnet is the right call
+
+The default. Reach for Sonnet first; reach for Opus only when a Sonnet run produces wrong-shape output, not just slow output. The case to escalate is task difficulty — architectural reasoning, multi-file invariants, agentic chains where the model needs to push back on framing — not task size. Long, productive Sonnet runs don't need to escalate.
+:::
+
+
+## Opus 4.7 — long-horizon model {#opus}
+
+Opus 4.7 is the current capability ceiling — and the tier most likely to be over-prescribed. Anthropic recommends starting with Opus 4.7 "for the most complex tasks," which is true and beside the point: a small fraction of real workloads are "most complex" tasks, and 5× the per-token cost of Haiku is a meaningful price for capability you mostly don't reach. The case for paying it is the last 10–15 percentage points of capability — which matters, but only sometimes. The default tier on Max and Team Premium plans is Opus 4.7 [@anthropic-model-config]; Anthropic positions it for "professional software engineering, complex agentic workflows, and high-stakes enterprise tasks" [@anthropic-claude-opus].
+
+Headline benchmarks from Anthropic's announcement (see references for transcribed values):
+
+- **SWE-bench Verified: 87.6%** (vs Opus 4.6 at 80.8%)
+- **SWE-bench Pro: 64.3%** — leapfrogs the leading non-Anthropic models at the time of release
+- **OSWorld-Verified: 78.0%**
+- **GPQA Diamond: 94.2%**
+- **CharXiv (vision): 82.1% no-tools, 91.0% with tools** — large jump driven by the new high-resolution vision pipeline
+- **Anthropic-internal visual-acuity benchmark: 98.5%** (vs Opus 4.6's 54.5%) — Anthropic's own benchmark, not a public one like OSWorld, but the largest single-generation jump they published
+
+Anthropic also cited a **customer-internal 93-task coding benchmark** where Opus 4.7 lifted resolution by 13% over 4.6 and solved four tasks neither 4.6 nor Sonnet 4.6 could solve at all [@anthropic-opus-4-7]. This is the closest Anthropic comes to quantifying "tasks only Opus can do" — they exist, but as a small fraction of a real workload.
+
+**What breaks moving from Opus 4.6 to 4.7.** Extended thinking is gone — Opus 4.7 supports adaptive thinking only, and calls passing `budget_tokens` return a 400 error. Sampling parameters (`temperature`, `top_p`, `top_k`) set to non-default values also 400. Thinking content is empty by default in response streams unless the caller opts in. The behavior tuning matters more than any of those: 4.7 follows instructions more literally, makes fewer tool calls by default, and spawns fewer subagents than 4.6 — code that depended on the old behavior will see different results without changing a line [@anthropic-whats-new-4-7].
+
+**What changes without breaking anything.** A new tokenizer means the same source text may use roughly **1× to 1.35× as many tokens** as older models [@anthropic-pricing] — per-MTok price didn't change but per-task cost did. Vision capacity expanded to 2576px / 3.75MP (3.3× the prior limit), with image coordinates now 1:1 with pixels — the CharXiv vision jump and the 98.5% computer-use acuity number are downstream of this. A new `xhigh` effort level is the recommended Claude Code default; `max` is flagged by Anthropic as prone to overthinking [@anthropic-model-config]. The `task_budget` beta caps total tokens across an agentic loop (minimum 20K), useful for bounding runaway long-horizon runs.
+
+**The cybersecurity changes are friction more than capability shift.** Opus 4.7 auto-blocks prohibited cyber requests in real time; legitimate red-team and vulnerability-research workflows may require applying to Anthropic's Cyber Verification Program [@anthropic-whats-new-4-7] — the announcement doesn't characterize the underlying cyber capability as different from 4.6, but the gating around it is new. If your workload includes those patterns, this is the change to watch for.
+
+Worth flagging: Opus 4.7 **regressed on BrowseComp** vs Opus 4.6. It is not uniformly better than 4.6 across every benchmark — the gains are concentrated in software engineering, vision, and reasoning, not in browser-driven research tasks.
+
+::: {.callout-note icon=false}
+#### When Opus is the right call
+
+When the task is hard, not when it's long. The case for Opus is architectural reasoning, multi-file invariants, agentic chains that need pushback on framing — work where the model has to recognize the question is wrong, not just answer it. If a Sonnet run is looping or producing wrong-shape output, escalating is correct; if it's going long but making steady progress, staying on Sonnet is correct. Same context, same wall: if [first-approach anchoring](llm-failure-modes.qmd#first-approach-anchoring) is operating, re-prompting Sonnet inside the anchored context won't escape it — the context window's gravity holds regardless of how the next message is phrased. A different model with different weights gives you a genuinely different prior over continuations, which is what you want when the trajectory is the problem.
+:::
+
+
+## Cost vs capability {#cost}
+
+The list-price gap from Haiku to Opus is 5×; the SWE-bench gap is **roughly 14 percentage points** (Haiku 73.3% averaged over 50 trials with a 128K thinking budget, Opus 87.6% under different reporting conditions — directional, not measurement-equivalent). Those aren't proportional, and they aren't supposed to be. The price tiers function as cost segmentation as much as capability differentiation — you're paying 5× for a meaningful but bounded capability gain (14 SWE-bench points is a lot, just not 5×-a-lot), worth it on the workloads that actually need the upper end and overkill on the rest. "SWE-bench points per dollar of output tokens" makes the cost shape concrete (read the ratios as directional, not as a measurement-equivalent comparison):
+
+```{ojs}
+//| label: fig-cost-capability
+//| fig-cap: "SWE-bench Verified score (solid bars) and cost per million output tokens (faded bars), per model. The points-per-dollar ratio — roughly 4× higher on Haiku than Opus on this benchmark — is shown explicitly in the table below."
+{
+  const data = [
+    {model: "Haiku 4.5",  swe: 73.3, output: 5,  color: "#0891b2"},
+    {model: "Sonnet 4.6", swe: 79.6, output: 15, color: "#16a34a"},
+    {model: "Opus 4.7",   swe: 87.6, output: 25, color: "#7c3aed"}
+  ];
+  const w = 660, h = 280, padL = 80, padR = 30, padT = 20, padB = 60;
+  const innerW = w - padL - padR;
+  const innerH = h - padT - padB;
+  const barH = 28;
+  const groupH = barH * 2 + 6;
+
+  const maxSwe = 100;
+  const maxCost = 30;
+
+  const svg = d3.create("svg")
+    .attr("viewBox", `0 0 ${w} ${h}`)
+    .attr("width", "100%")
+    .style("max-width", "680px");
+
+  data.forEach((d, i) => {
+    const groupY = padT + i * (groupH + 24);
+
+    svg.append("text")
+      .attr("x", padL - 10)
+      .attr("y", groupY + groupH / 2 + 4)
+      .attr("text-anchor", "end")
+      .attr("font-size", "12px")
+      .attr("font-weight", "600")
+      .attr("fill", d.color)
+      .text(d.model);
+
+    svg.append("rect")
+      .attr("x", padL)
+      .attr("y", groupY)
+      .attr("width", (d.swe / maxSwe) * innerW)
+      .attr("height", barH)
+      .attr("fill", d.color)
+      .attr("opacity", 0.85)
+      .attr("rx", 3);
+
+    svg.append("text")
+      .attr("x", padL + (d.swe / maxSwe) * innerW + 6)
+      .attr("y", groupY + barH / 2 + 4)
+      .attr("font-size", "11px")
+      .attr("fill", "#444")
+      .text(`SWE-bench ${d.swe}%`);
+
+    svg.append("rect")
+      .attr("x", padL)
+      .attr("y", groupY + barH + 6)
+      .attr("width", (d.output / maxCost) * innerW)
+      .attr("height", barH)
+      .attr("fill", d.color)
+      .attr("opacity", 0.35)
+      .attr("rx", 3);
+
+    svg.append("text")
+      .attr("x", padL + (d.output / maxCost) * innerW + 6)
+      .attr("y", groupY + barH + 6 + barH / 2 + 4)
+      .attr("font-size", "11px")
+      .attr("fill", "#444")
+      .text(`$${d.output} / MTok output`);
+  });
+
+  svg.append("text")
+    .attr("x", padL)
+    .attr("y", h - 18)
+    .attr("font-size", "11px")
+    .attr("fill", "#666")
+    .text("Solid bar: SWE-bench Verified (% of 100). Faded bar: output price (% of $30/MTok).");
+
+  return svg.node();
+}
+```
+
+The arithmetic of that chart, made explicit:
+
+| | SWE-bench | Output $/MTok | Points / $ |
+|---|---|---|---|
+| Haiku 4.5  | 73.3% | $5  | **14.66** |
+| Sonnet 4.6 | 79.6% | $15 | 5.31 |
+| Opus 4.7   | 87.6% | $25 | 3.50 |
+
+Haiku has roughly **4×** the points-per-dollar of Opus on this benchmark. That doesn't mean Haiku is the right tool for everything; it means the premium tiers are buying you the **last 10–15 percentage points** of capability, and that's exactly where the hardest real tasks live. The user-preference data Anthropic published for Sonnet 4.6 (preferred over Opus 4.5 in 59% of comparisons) gestures at this: for the median task, capability is at parity, and the cost difference is the deciding factor.
+
+Two cost factors not in the headline price (caching arithmetic in [Cost levers](#cost-levers); tokenizer mechanics in the [appendix](#tokens-appendix)):
+
+1. **Opus 4.7's tokenizer** consumes 1× to 1.35× as many tokens as older models for the same source text — per-MTok price didn't change but per-task cost did.
+2. **Prompt caching** at 10% of base input price across all three tiers compresses Opus's absolute per-task input cost ~10×; the 5× ratio versus Haiku is preserved, but the dollar amounts on the cache-hit path get small enough that tier choice matters less than cache hit rate. For Claude Code's repeated-context pattern (system prompt, tool definitions, file reads), real-world per-task cost depends much more on cache hit rate than on headline pricing.
+
+
+## What we don't know — parameter size and architecture {#unknowns}
+
+**Anthropic does not disclose parameter counts for any current Claude model.** This is a deliberate non-disclosure that runs across their entire transparency framework: they describe frontier models by compute thresholds and R&D scale rather than by model size [@anthropic-transparency]. There is no primary source for "how many parameters does Sonnet 4.6 have."
+
+The third-party estimates that circulate online are unreliable. They range from 175B (claimed for older Sonnet generations) to 5T+ (claimed for current Opus), with no agreed-upon methodology. None of them have been confirmed by Anthropic, none come with reproducible benchmarks tying parameter count to inference latency, and several that get cited in articles trace back to a single LinkedIn post or a speculative blog. Treat them all as folklore.
+
+What you can actually infer from public data:
+
+- **Latency tiering implies architecture tiering, not parameter tiering directly.** Anthropic publishes only a relative latency ranking (Haiku fastest, Sonnet fast, Opus moderate). Speed differences could reflect parameter count, MoE active-parameter count, serving-stack optimizations, or all three. There is no public statement on which.
+- **The tokenizer changed in Opus 4.7.** This is the only architectural detail Anthropic published at the 4.7 launch — and even then, the documented effect is "1.0–1.35× more tokens for the same text," not a description of how the tokenizer works. The change is documented on the pricing page [@anthropic-pricing] and in "What's new in 4.7" [@anthropic-whats-new-4-7].
+- **Whether the models are MoE or dense is not publicly stated.** Speculation runs both directions; Anthropic has not commented.
+- **Compute and TFLOPs per call are not published.** Anthropic discloses aggregate R&D spend in the transparency framework, not per-model.
+
+What this means in practice: claims like "Opus is 10× the parameters of Sonnet" or "Haiku is the same model with quantization" should be treated as guesses regardless of who's making them. The price tiers and benchmarks are real and citable; the architectural reasons behind them aren't.
+
+::: {.callout-note icon=false}
+#### What you can ground in public data
+
+Use Anthropic's published benchmarks, latency rankings, context window sizes, and pricing to reason about tier choice. These are the variables under your control — and they're sufficient. Parameter counts would be useful if you were training your own models against Claude; for picking a tier inside Claude Code, they don't change the decision.
+:::
+
+
+## How Claude Code uses the tiers {#claude-code}
+
+The Claude Code harness doesn't always use the model you think it's using. There are several routing paths and they each pick a different tier.
+
+### Default model per plan
+
+The default is set by your subscription, not by Claude Code itself [@anthropic-model-config]:
+
+| Plan | Default user-facing model |
+|---|---|
+| Pro, Team Standard, Enterprise, Anthropic API | Sonnet 4.6 |
+| Max, Team Premium | Opus 4.7 |
+| Bedrock, Vertex, Foundry | Sonnet 4.5 (newer models available via explicit dated model ID) |
+
+An announced cutover on Apr 23, 2026 will switch the default for **Enterprise pay-as-you-go and Anthropic API users only** to Opus 4.7. Docs still describe the change as forthcoming, so verify on your own account.
+
+The Bedrock/Vertex/Foundry difference matters: those routes lag the Anthropic API by a generation. `opus` on Bedrock resolves to Opus 4.6, `sonnet` resolves to Sonnet 4.5. If you've configured Claude Code to use a cloud provider, the model under the alias is older than what `claude.com` is serving.
+
+### `/model` aliases
+
+The `/model` command accepts both exact model IDs and aliases:
+
+- `opus`, `sonnet`, `haiku` — current generation in the active plan
+- `default` — clears any override, reverts to the plan default
+- `best` — currently equivalent to `opus`
+- `opus[1m]`, `sonnet[1m]` — explicit 1M-context variants. On Max / Team / Enterprise plans, plain `opus` is auto-upgraded to 1M context already; Sonnet's 1M is **not** auto-included on those plans and requires extra usage.
+- `opusplan` — a special hybrid: **Opus during plan mode, Sonnet during execution**. This is the cheapest way to get Opus-grade planning without paying Opus rates for the long execution tail. The 1M auto-upgrade does NOT apply to `opusplan`.
+
+### Effort levels
+
+Effort levels exist on Opus 4.7, Opus 4.6, and Sonnet 4.6. As of Claude Code **v2.1.117**, the harness defaults are `xhigh` for Opus 4.7 and `high` for Opus 4.6 and Sonnet 4.6 [@anthropic-model-config]. Opus 4.7 itself requires Claude Code **v2.1.111+**.
+
+| Model | Effort levels | Default |
+|---|---|---|
+| Opus 4.7 | `low`, `medium`, `high`, `xhigh`, `max` | `xhigh` |
+| Opus 4.6, Sonnet 4.6 | `low`, `medium`, `high`, `max` | `high` |
+| Haiku 4.5 | not parameterized | n/a |
+
+Anthropic's per-level guidance for Opus 4.7 [@anthropic-model-config]:
+
+- `low` — short, scoped, latency-sensitive tasks that aren't intelligence-sensitive
+- `medium` — cost-sensitive work that can trade off some intelligence
+- `high` — minimum for intelligence-sensitive work
+- `xhigh` — best results for most coding and agentic tasks; recommended default
+- `max` — demanding tasks but may show diminishing returns and is prone to overthinking
+
+The framing is unusually direct: Anthropic itself flags `max` as overthinking-prone. `xhigh` is the level the harness defaults to for a reason.
+
+Under the hood, `effort` is a public Anthropic API parameter (`output_config.effort`), not a Claude Code knob — the harness just passes the user's choice through. Anthropic describes it as a "behavioral signal, not a strict token budget" that shapes thinking depth, response verbosity, and tool-call patterns, with per-model calibration [@anthropic-effort].
+
+#### What this means in practice
+
+- **Default is fine for almost everyone — leave it.** The harness's `xhigh`/`high` defaults match Anthropic's recommended levels.
+- **Don't reach for `max` reflexively on hard problems.** Anthropic warns it's prone to overthinking. If a problem is genuinely hard, escalating *tier* (Sonnet → Opus) usually helps more than escalating *effort*.
+- **Drop one level when cost is the bottleneck and the work is well-specified.** Lower effort spends fewer thinking tokens; if output quality holds at `high`, you keep the savings without sacrificing what matters for your task shape.
+- **Effort and tier are independent.** `high`-effort Sonnet isn't the same as `low`-effort Opus, and conflating them is a common mistake. Pick the tier based on task difficulty, then tune effort.
+
+### Fast mode
+
+`/fast` is a separate axis from model selection. It's Opus 4.6 only — not Opus 4.7, not Sonnet — and trades a 6× price premium for up to 2.5× output tokens per second at the same intelligence [@anthropic-fast-mode]. Pricing in fast mode is **$30 / MTok input, $150 / MTok output**. Fast mode is incompatible with the Batch API and Priority Tier; switching speeds invalidates the prompt cache.
+
+### Subagent and background tasks
+
+Claude Code's internal subagents (the Explore tool, gsd-* agents, code reviewers, etc.) run on a configurable model, controlled by:
+
+- `CLAUDE_CODE_SUBAGENT_MODEL` — model used when the harness spawns subagents
+- `ANTHROPIC_DEFAULT_HAIKU_MODEL` — controls Haiku-tier background tasks (replaces the deprecated `ANTHROPIC_SMALL_FAST_MODEL`)
+
+This is the path where Haiku 4.5 actually does most of its work in a typical Claude Code session: the user-facing model is Sonnet or Opus, the background workers are Haiku.
+
+#### What this means in practice
+
+- **Defaults are tuned — don't override casually.** A common mistake: setting `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` thinking it makes subagents "better," not realizing subagents fan out across every session and the cost compounds.
+- **Override `CLAUDE_CODE_SUBAGENT_MODEL` only if subagent quality is the bottleneck.** Symptom: subagents return wrong-shape output or miss what you asked them to find. If subagents are *slow*, more model doesn't help — slow subagents are usually a scope problem, not a model problem.
+- **Override `ANTHROPIC_DEFAULT_HAIKU_MODEL` rarely.** The main reason is pinning a specific Haiku version for reproducibility, or testing a newer Haiku before the harness adopts it as default.
+- **For fan-out-heavy workflows, the subagent setting moves the bill more than the user-facing tier does.** A Sonnet-tier subagent across hundreds of spawns is expensive; the cost of the user-facing chat is dwarfed by the parallel work. Audit the env vars before assuming the user-facing `/model` is where your money is going.
+
+
+## Choosing a tier {#choosing}
+
+The contrarian default, in order of cost-efficiency:
+
+**Default to Sonnet 4.6.** Anthropic's own preference data shows users picking it over Opus 4.5 most of the time. The 1M context window covers single-session work. People who reach for Opus reflexively are paying 5× for capability they mostly don't reach.
+
+**Escalate to Opus 4.7 only when Sonnet stalls.** Architectural reasoning, multi-file refactors with tricky invariants, agentic chains where the model has to push back on framing. If your Sonnet run is going long but making progress, staying on Sonnet is correct. If it's looping or producing wrong-shape output, escalate. The customer-internal benchmark Anthropic cited (4 tasks neither 4.6 nor Sonnet 4.6 could solve, only 4.7 could) is a real category but a small one — most workloads never reach it.
+
+**Drop to Haiku 4.5 for parallel and background work.** Code search, classification, summarization, file-read fan-out. Augment's 90%-of-Sonnet-4.5 result applies when ceiling intelligence isn't the bottleneck — and a lot of real work isn't bottlenecked on ceiling intelligence. Inside Claude Code this happens via subagent and background-task settings; explicit `/model haiku` for the user-facing chat is the right call when you're doing many cheap parallel queries.
+
+**Use `opusplan`** for Opus-grade planning + Sonnet-grade execution — the cheapest path to "think hard about the approach, then a faster model carries it out."
+
+**Use `/fast` only when interactive latency is the bottleneck.** 6× price premium for 2.5× speed, on Opus 4.6 (not 4.7). For UIs where a user is watching tokens stream, can be worth it. For agentic loops, almost never.
+
+::: {.callout-tip icon=false}
+## Key takeaway
+
+The 5× list-price gap doesn't track the capability gap, and that's the entire reason there are three tiers rather than one. Sonnet 4.6 is the right default for most work; Opus 4.7 is for the hardest tail; Haiku 4.5 is for the parallelizable bulk. The Claude Code harness is built to route between them — the model selection isn't a single decision, it's a per-task one.
+:::
+
+
+
+## Appendix — How tokens work {#tokens-appendix}
+
+Bonus material for readers who want the mechanics behind the cost claims above. Skip if you've already internalized subword tokenization and prefill-vs-decode economics.
+
+### What a token is
+
+A token is the unit a transformer model actually processes. Tokens aren't characters and aren't words — they're sub-word fragments produced by a learned tokenizer. Modern LLMs typically use one of three families:
+
+- **Byte-Pair Encoding (BPE)** — start from characters, iteratively merge the most frequent adjacent pairs in the training corpus until you have a fixed vocabulary (50K–150K tokens is typical). Sennrich et al. (2016).
+- **Byte-level BPE (BBPE)** — same merge algorithm but starting from raw bytes rather than Unicode characters, so the tokenizer can losslessly handle any input — emoji, code points unseen at training time, malformed UTF-8. GPT-2/3/4 and Llama use variants of this.
+- **SentencePiece (unigram LM)** — Google's library, used in T5, PaLM, and Gemini. Uses a probabilistic vocabulary model rather than a deterministic merge rule.
+
+Anthropic doesn't publish which family Claude uses; it's almost certainly BPE-family (the family is what most modern LLMs use), but the specifics aren't documented. The practical implications are similar across approaches: common subwords become single tokens, rare or novel strings fragment into smaller pieces.
+
+Rough rules of thumb for English prose, per Anthropic's pricing FAQ [@anthropic-pricing]: about **0.75 words per token**, or **4 characters per token** (i.e., roughly 1.3 tokens per word). Some illustrative tokenizations of how subword tokenizers in this family typically split text — exact splits depend on the tokenizer revision, and the API exposes `messages.count_tokens` if you need precise numbers:
+
+- Common single English words usually collapse to one token: `hello`, `world`, `python`, `function`.
+- Compound or technical terms split: `tokenization` is typically 2 tokens (`token` + `ization`); `unicode` is often 1.
+- Coined or nonsense strings fragment heavily: `krelvinor` is 4–5 tokens of byte-level fragments.
+- Code tokenizes differently from prose. Punctuation, keywords, and symbols each consume tokens; whitespace is sometimes its own token, sometimes prefixed onto the next word. `if (x == y) { return true; }` runs roughly 10–12 tokens.
+- Numbers and non-English text tokenize worse than English prose. A 7-digit number can fragment into 2–4 tokens; scripts that weren't well-represented in training fragment into byte-level tokens. `こんにちは` might be 5+ tokens despite being one Japanese word — and that's why arithmetic and string-manipulation failures cluster around tokenization (covered in [the LLM failure modes article](llm-failure-modes.qmd)).
+
+This is also why Opus 4.7's new tokenizer matters in dollars: same source text, **may use roughly 1× to 1.35× as many tokens** as older Claude models. Invisible at the API level, real on the bill.
+
+### Input vs output: prefill, decode, and the 5× cost asymmetry
+
+Input tokens are what you send to the model: system prompt, tool definitions, conversation history, the current user message. Output tokens are what the model generates in response. Both are billed, but output costs **5× more per token** than input across every Claude tier — Haiku $1/$5, Sonnet $3/$15, Opus $5/$25. The premium tracks a real asymmetry in how generation is computed; the specific 5× is a pricing simplification on top of it. The rest of this section is a quick walk through *why*.
+
+#### What the model is actually doing
+
+A transformer is a function: take a sequence of tokens, return a probability distribution over the next token. To generate text, the serving stack does this in a loop — feed the sequence in, get probabilities, sample a token, append it, repeat. The model's weights never change between requests; what changes is the sequence flowing through them.
+
+The dominant cost inside the model is **attention**. At each transformer layer, every token "looks at" the prior tokens in the sequence (Claude is a *causal* model — attention only looks backward, never forward). The math involves three learned projections per token: query (Q), key (K), and value (V), all computed from the token's current representation. In effect: each token uses its query to look up a weighted combination of prior tokens' values, with the weights determined by how well its query matches each prior token's key. The output of attention then feeds into a feed-forward block, which produces the input to the next layer. After all layers, the final-token representation gets projected to vocabulary logits — the probability distribution over the next token.
+
+That's one pass through the model. Generation requires many passes, and the cost of those passes splits into two very different phases.
+
+#### Prefill — process the prompt in parallel
+
+**Prefill** is what happens when you submit a prompt. The model has to "ingest" every input token before it can generate anything: it needs to compute the K and V values that every token contributes to attention, at every layer. Crucially, these can be computed *in parallel* — within a layer, no input token's K or V depends on any other input token's K or V (they're each just linear projections of the layer's input). GPUs are extremely good at this kind of dense parallel matrix work, so prefill chews through the whole prompt with what's essentially one big batched matrix multiplication per layer. A 50,000-token prompt and a 500-token prompt take similar wall-clock time per layer (modulo memory bandwidth) — what matters is the matmul cost, not the token count, up to the batch the hardware can handle.
+
+The K,V values get saved in a per-request **KV-cache** for the next phase, and the model emits a probability distribution for the first output token.
+
+#### Decode — generate one token at a time
+
+**Decode** is what happens once generation begins. Output tokens are produced one at a time, in sequence. For each new output token, the model:
+
+1. Runs a forward pass through every transformer layer, computing Q, K, and V *only for the new token*.
+2. Uses the new token's Q to attend against all the cached K,V from prior tokens — pulled from the KV-cache rather than recomputed from scratch.
+3. Appends this token's K,V into the cache so the next decode step can use them.
+4. Samples the next token from the resulting probability distribution.
+
+Decode steps are dramatically cheaper than re-running prefill from scratch every step would be — that's exactly what the KV-cache buys you. But the serial structure is unavoidable: token N can't be computed until token N−1 has been sampled and added to the sequence, because token N's input depends on what was just generated. A 1,000-token response is 1,000 sequential decode steps, no matter how powerful the GPU; the hardware can only work on one token at a time within any given response.
+
+#### Why output costs 5× more
+
+Prefill and decode run the same model weights, but their cost shapes are very different. Prefill amortizes one parallel matrix-multiply across thousands of input tokens; decode pays approximately the same matrix-multiply *per output token*, in series. Per-token throughput on output ends up roughly 10–100× lower than on input, depending on hardware and model size. That asymmetry motivates a per-token output premium — but the specific **5×** is a pricing-strategy choice, not a unit-economics readout: the same 5× ratio holds across Haiku, Sonnet, and Opus (three differently-sized models with different serving characteristics), and if the ratio actually tracked compute economics it would vary across tiers. Anthropic settled on 5× across the board because consistent pricing is easier to communicate than a model-specific multiplier. (Sarathi [@sarathi-2023] covers the prefill/decode dichotomy explicitly; Pope et al. [@pope-2022] covers the broader scaling/partitioning landscape for transformer serving.)
+
+For Claude Code, the input/output mix is heavily input-dominated: large system prompt, tool definitions, MCP schemas, file contents read into context, conversation history. The model's actual responses are usually a small fraction of total tokens. Real blended per-task cost looks closer to the input rate than to the headline output rate.
+
+
+## References {.unnumbered}
+
+::: {#refs}
+:::
