@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses a well-structured error enum with distinct variants for each failure mode, though the domain itself is simple enough that there's little room for further newtype modeling."},
+  "error_handling": {"score": 2, "justification": "Typed error enum with meaningfully distinct variants and no panics in library paths, but the wrapping_sub/wrapping_add usage masks potential overflow without documented reasoning."},
+  "api_ergonomics": {"score": 2, "justification": "Clean public surface with sensible derives (Debug, Clone, PartialEq, Eq) and Display impl, but lacks doc comments on any public items and doesn't implement std::error::Error."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with ?, iterator methods, and derives, though re-encoding via to_roman for canonical validation and the wrapping arithmetic are slightly non-idiomatic shortcuts."}
+}

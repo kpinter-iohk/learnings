@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Good enums for Expr/BinOp/Value and distinguishing EvalError variants, but TypeError carries a free-form String rather than a structured kind/operand-type representation."},
+  "error_handling":      {"score": 2, "justification": "Typed error enums with the three required EvalError variants and offset on ParseError; library never panics, though TypeError detail is stringly-typed and one `unwrap_or` is undocumented."},
+  "api_ergonomics":      {"score": 1, "justification": "Sensible derives, Display/Error impls, and a narrow surface, but no doc comments on any public item and ParseError exposes raw `pub` fields including a String message."},
+  "idiomaticity":        {"score": 2, "justification": "Uses `?`, `matches!`, derives, and pattern matching cleanly; some non-idiomatic touches remain like an O(n) Vec env lookup and repetitive type-check arms instead of a shared helper."}
+}

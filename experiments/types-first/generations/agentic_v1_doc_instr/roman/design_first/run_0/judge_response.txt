@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 3, "justification": "Distinct enum variants encode each failure mode (OutOfRange carrying the offending value, Empty, InvalidChar with the bad char, NotCanonical), with no stringly-typed data."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with meaningfully distinct variants, no panics or unwraps in library code, and uses saturating_add defensively."},
+  "api_ergonomics": {"score": 3, "justification": "Narrow public surface, Debug/Clone/PartialEq/Eq derives, Display impl, and doc comments on every public item with std-conventional naming."},
+  "idiomaticity": {"score": 3, "justification": "Uses matches!, iterator-based table lookup, idiomatic enum error handling, and avoids unnecessary clones, though the round-trip re-encoding check is a slightly heavyweight canonicality test."}
+}

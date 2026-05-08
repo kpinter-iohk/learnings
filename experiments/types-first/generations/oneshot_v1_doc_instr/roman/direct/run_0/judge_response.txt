@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 3, "justification": "RomanError is a well-designed enum with distinct variants carrying relevant data (the offending value or character), and no stringly-typed or boolean-tagged data is used."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with meaningfully distinct variants (OutOfRange, Empty, InvalidCharacter, NotCanonical), no panics or unwraps in library code, and overflow is avoided via u64 accumulation."},
+  "api_ergonomics": {"score": 3, "justification": "Narrow public surface with complete derives (Debug, Clone, PartialEq, Eq), Display impl, doc comments on every public item, and naming consistent with std conventions."},
+  "idiomaticity": {"score": 3, "justification": "Uses iterator-based char validation, matches! in tests, slice patterns, Option chaining via get/copied/map, and a clean greedy table-driven encoder with no unnecessary clones."}
+}

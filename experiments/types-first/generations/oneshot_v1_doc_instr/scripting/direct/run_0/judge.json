@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "scripting",
+  "treatment": "direct",
+  "run": 0,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Good use of enums for Expr, BinOp, UnaryOp, Value, and EvalError variants, but TypeError carries a String message rather than a structured variant and ParseError similarly uses a free-form message string.",
+    "error_handling": "Typed error enums with the three required distinguishing variants and no panics in library paths, but TypeError/ParseError lean on stringly-typed messages and there are no documented expect/unwrap rationales.",
+    "api_ergonomics": "Public items lack doc comments (only a module-level comment exists), and manual Debug impls are provided where derives would suffice, though Display is correctly implemented and the surface is reasonably narrow.",
+    "idiomaticity": "Generally idiomatic with ?, matches!, and recursive descent, but uses Vec<(&str, Value)> with clone-on-extend for the environment and a needless format! without arguments in parse_atom."
+  }
+}

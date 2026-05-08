@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Error enum has meaningful variants carrying relevant data (OutOfRange(u32), InvalidChar(char)), though NonCanonical could be more granular about why parsing failed."},
+  "error_handling": {"score": 2, "justification": "Typed error enum with distinguishing variants and no library panics in normal flow, but uses unreachable!() in value_of without a documented safety comment."},
+  "api_ergonomics": {"score": 1, "justification": "Reasonable derives on RomanError and Display is implemented, but no doc comments on any public items and std::error::Error is not implemented."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with iterators, slice indexing, and derives, but the manual byte-index while loop and unreachable!() over an exhaustive match-after-validate could be refactored more cleanly."}
+}

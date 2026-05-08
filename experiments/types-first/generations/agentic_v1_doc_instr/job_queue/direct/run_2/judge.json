@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "job_queue",
+  "treatment": "direct",
+  "run": 2,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Uses a newtype JobId, typed error enum, and separate internal/external state enums encoding retry_at in the variant, though the public JobState is forced flat by spec.",
+    "error_handling": "Typed QueueError with distinguishing UnknownId/NotRunning variants and proper Display, but new() panics via assert! and checkout uses expect() without a documented reason.",
+    "api_ergonomics": "Reasonable derives and method shapes, but no doc comments on any public item, no Display for JobId/JobState, and QueueError is not marked #[non_exhaustive] nor implements std::error::Error.",
+    "idiomaticity": "Uses ?, derives, pattern matching, and Option chaining reasonably, but the manual best-seq loop could be an iterator min_by_key and the payload is cloned rather than borrowed."
+  }
+}

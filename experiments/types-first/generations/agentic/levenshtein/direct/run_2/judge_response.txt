@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "The domain is inherently numeric (a count) so usize is appropriate; there's little opportunity for richer typing in this small API."},
+  "error_handling": {"score": 3, "justification": "The function is total and cannot fail, so no Result is needed; there are no panics, unwraps, or expects in the implementation."},
+  "api_ergonomics": {"score": 1, "justification": "The signature matches the spec and uses &str idiomatically, but there are no doc comments on the public function and no module-level documentation."},
+  "idiomaticity": {"score": 2, "justification": "Uses iterator collection, range syntax, mem::swap for row reuse, and min chaining; manual indexed loops are idiomatic for this DP but a few touches like a `usize::from(...)` for cost or eliminating the early returns could tighten it."}
+}

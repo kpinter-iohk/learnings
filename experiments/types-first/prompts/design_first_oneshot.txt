@@ -1,0 +1,15 @@
+Implement the following in Rust as the contents of a single `lib.rs`. Use only the standard library.
+
+Do this in two steps.
+
+**Step 1.** Design the data types (structs, enums) and public function signatures. Output them with `todo!()` bodies — no real implementations yet.
+
+**Step 2.** Implement the bodies, keeping the type design from step 1. Output the complete `lib.rs` file.
+
+---
+
+<<TASK_SPEC>>
+
+---
+
+Output step 1 first, then step 2 as the complete `lib.rs` file.

@@ -1,0 +1,34 @@
+Build an in-memory job queue with retry-on-failure in Rust.
+
+A job has:
+- a unique `JobId` assigned by the queue at enqueue time
+- a `String` payload (the queue does not interpret it)
+- a state (one of `Pending`, `Running`, `FailedPendingRetry`, `Succeeded`, `Dead`)
+- an attempt counter starting at 0
+
+Required public API:
+
+- `Queue::new(max_attempts: u32, base_delay: Duration) -> Self` — `max_attempts >= 1`.
+- `enqueue(&mut self, payload: String) -> JobId`
+- `checkout(&mut self, now: Instant) -> Option<CheckedOut>` — returns the next runnable job (a `Pending` job, or a `FailedPendingRetry` job whose retry time is `<= now`). Once returned, the job is in state `Running` and cannot be checked out again until `succeed` or `fail` is called for its ID. If no job is runnable, returns `None`.
+- `succeed(&mut self, id: JobId) -> Result<(), QueueError>` — running → succeeded.
+- `fail(&mut self, id: JobId, now: Instant) -> Result<(), QueueError>` — increments the attempt counter; if the new attempts value is `< max_attempts`, transitions the job to `FailedPendingRetry` with retry time `now + base_delay * 2^(new_attempts - 1)`; otherwise transitions to `Dead`.
+- `get_state(&self, id: JobId) -> Option<JobState>` — returns the current state, or `None` for an unknown ID.
+
+The `CheckedOut` value returned by `checkout` must expose:
+- `pub fn id(&self) -> JobId`
+- `pub fn payload(&self) -> &str`
+
+`succeed` or `fail` called on a job that is not currently `Running` returns an error.
+
+The `JobState` enum must have exactly these variants (the variant names are part of the public API):
+
+```rust
+pub enum JobState { Pending, Running, FailedPendingRetry, Succeeded, Dead }
+```
+
+`JobState` must derive or implement `PartialEq`, `Eq`, and `Debug`.
+
+`JobId`, `QueueError`, and `CheckedOut` are public types whose internal shape is your choice. `JobId` must implement `Copy`, `Eq`, `Hash`, and `Debug`. `QueueError` must implement `Debug` and `Display`.
+
+Standard library only. The complete program is one `lib.rs`.

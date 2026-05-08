@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 3, "justification": "RomanError is a well-modeled enum with distinct variants carrying relevant data (the offending value or character), and the lookup table uses a tuple array appropriate for the small fixed domain."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with meaningfully distinguished variants, no panics in library paths, and the only unreachable!() is guarded by a prior exhaustive character check making it sound."},
+  "api_ergonomics": {"score": 3, "justification": "Narrow public surface with doc comments on all public items, sensible derives (Debug, Clone, PartialEq, Eq) on the error, Display implemented, and naming consistent with std conventions."},
+  "idiomaticity": {"score": 3, "justification": "Uses matches!, iterator-style for loop over the table, ? operator, slice-based parsing with get/copied/map, and avoids unnecessary clones in a clean idiomatic style."}
+}

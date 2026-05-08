@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Newtype JobId, typed error enum, and separate internal/public state enums with retry data on the variant; misses opportunities like a typed CheckoutError vs general QueueError or distinct error variants per operation."},
+  "error_handling": {"score": 2, "justification": "Typed QueueError with informative UnknownJob/NotRunning variants and Display impl; uses an assert! in new() and an unwrap() in checkout without documented reasoning."},
+  "api_ergonomics": {"score": 1, "justification": "Public surface is reasonable with sensible derives, but there are no doc comments on any public item and QueueError lacks std::error::Error impl."},
+  "idiomaticity": {"score": 2, "justification": "Uses ?, derives, and pattern matching reasonably well, but the checkout loop awkwardly does a second HashMap lookup after iteration and clones the payload rather than structuring borrows more cleanly."}
+}

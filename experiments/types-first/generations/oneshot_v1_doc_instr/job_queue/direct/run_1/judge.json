@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "job_queue",
+  "treatment": "direct",
+  "run": 1,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Uses a newtype JobId, a proper JobState enum, and a typed QueueError with distinguishing variants; internal Job struct uses Option<Instant> rather than encoding state-dependent data in the JobState enum itself.",
+    "error_handling": "Typed error enum with informative variants and Display/Error impls; uses an assert! in new() and an expect(\"job exists\") without a documented safety comment, plus saturating fallbacks rather than propagating overflow.",
+    "api_ergonomics": "Public surface is reasonable with sensible derives and a Display impl, but there are no doc comments on any public items and no derives like Default or Clone where they might be useful.",
+    "idiomaticity": "Generally idiomatic with ?, ok_or, matches! in tests, and proper derives, but the checkout loop manually scans and clones the payload rather than using iterator methods, and uses a verbose match instead of get/and_then patterns."
+  }
+}

@@ -1,0 +1,247 @@
+You are an expert Rust reviewer scoring a single library implementation against a spec.
+
+The code implements this spec:
+
+---
+Build an in-memory job queue with retry-on-failure in Rust.
+
+A job has:
+- a unique `JobId` assigned by the queue at enqueue time
+- a `String` payload (the queue does not interpret it)
+- a state (one of `Pending`, `Running`, `FailedPendingRetry`, `Succeeded`, `Dead`)
+- an attempt counter starting at 0
+
+Required public API:
+
+- `Queue::new(max_attempts: u32, base_delay: Duration) -> Self` — `max_attempts >= 1`.
+- `enqueue(&mut self, payload: String) -> JobId`
+- `checkout(&mut self, now: Instant) -> Option<CheckedOut>` — returns the next runnable job (a `Pending` job, or a `FailedPendingRetry` job whose retry time is `<= now`). Once returned, the job is in state `Running` and cannot be checked out again until `succeed` or `fail` is called for its ID. If no job is runnable, returns `None`.
+- `succeed(&mut self, id: JobId) -> Result<(), QueueError>` — running → succeeded.
+- `fail(&mut self, id: JobId, now: Instant) -> Result<(), QueueError>` — increments the attempt counter; if the new attempts value is `< max_attempts`, transitions the job to `FailedPendingRetry` with retry time `now + base_delay * 2^(new_attempts - 1)`; otherwise transitions to `Dead`.
+- `get_state(&self, id: JobId) -> Option<JobState>` — returns the current state, or `None` for an unknown ID.
+
+The `CheckedOut` value returned by `checkout` must expose:
+- `pub fn id(&self) -> JobId`
+- `pub fn payload(&self) -> &str`
+
+`succeed` or `fail` called on a job that is not currently `Running` returns an error.
+
+The `JobState` enum must have exactly these variants (the variant names are part of the public API):
+
+```rust
+pub enum JobState { Pending, Running, FailedPendingRetry, Succeeded, Dead }
+```
+
+`JobState` must derive or implement `PartialEq`, `Eq`, and `Debug`.
+
+`JobId`, `QueueError`, and `CheckedOut` are public types whose internal shape is your choice. `JobId` must implement `Copy`, `Eq`, `Hash`, and `Debug`. `QueueError` must implement `Debug` and `Display`.
+
+Standard library only. The complete program is one `lib.rs`.
+---
+
+The code:
+
+```rust
+use std::collections::BTreeMap;
+use std::fmt;
+use std::time::{Duration, Instant};
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum JobState {
+    Pending,
+    Running,
+    FailedPendingRetry,
+    Succeeded,
+    Dead,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub struct JobId(u64);
+
+#[derive(Debug)]
+pub enum QueueError {
+    UnknownJob,
+    NotRunning,
+}
+
+impl fmt::Display for QueueError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            QueueError::UnknownJob => write!(f, "unknown job id"),
+            QueueError::NotRunning => write!(f, "job is not currently running"),
+        }
+    }
+}
+
+pub struct CheckedOut {
+    id: JobId,
+    payload: String,
+}
+
+impl CheckedOut {
+    pub fn id(&self) -> JobId {
+        self.id
+    }
+
+    pub fn payload(&self) -> &str {
+        &self.payload
+    }
+}
+
+struct Job {
+    payload: String,
+    state: JobState,
+    attempts: u32,
+    retry_at: Option<Instant>,
+}
+
+pub struct Queue {
+    max_attempts: u32,
+    base_delay: Duration,
+    next_id: u64,
+    jobs: BTreeMap<JobId, Job>,
+}
+
+impl Queue {
+    pub fn new(max_attempts: u32, base_delay: Duration) -> Self {
+        assert!(max_attempts >= 1, "max_attempts must be >= 1");
+        Queue {
+            max_attempts,
+            base_delay,
+            next_id: 0,
+            jobs: BTreeMap::new(),
+        }
+    }
+
+    pub fn enqueue(&mut self, payload: String) -> JobId {
+        let id = JobId(self.next_id);
+        self.next_id += 1;
+        self.jobs.insert(
+            id,
+            Job {
+                payload,
+                state: JobState::Pending,
+                attempts: 0,
+                retry_at: None,
+            },
+        );
+        id
+    }
+
+    pub fn checkout(&mut self, now: Instant) -> Option<CheckedOut> {
+        for (id, job) in self.jobs.iter_mut() {
+            let runnable = match job.state {
+                JobState::Pending => true,
+                JobState::FailedPendingRetry => {
+                    job.retry_at.map_or(false, |t| t <= now)
+                }
+                _ => false,
+            };
+            if runnable {
+                job.state = JobState::Running;
+                return Some(CheckedOut {
+                    id: *id,
+                    payload: job.payload.clone(),
+                });
+            }
+        }
+        None
+    }
+
+    pub fn succeed(&mut self, id: JobId) -> Result<(), QueueError> {
+        let job = self.jobs.get_mut(&id).ok_or(QueueError::UnknownJob)?;
+        if job.state != JobState::Running {
+            return Err(QueueError::NotRunning);
+        }
+        job.state = JobState::Succeeded;
+        job.retry_at = None;
+        Ok(())
+    }
+
+    pub fn fail(&mut self, id: JobId, now: Instant) -> Result<(), QueueError> {
+        let max_attempts = self.max_attempts;
+        let base_delay = self.base_delay;
+        let job = self.jobs.get_mut(&id).ok_or(QueueError::UnknownJob)?;
+        if job.state != JobState::Running {
+            return Err(QueueError::NotRunning);
+        }
+        job.attempts = job.attempts.saturating_add(1);
+        if job.attempts < max_attempts {
+            let exponent = job.attempts - 1;
+            let multiplier: u32 = if exponent >= 32 {
+                u32::MAX
+            } else {
+                1u32 << exponent
+            };
+            job.state = JobState::FailedPendingRetry;
+            job.retry_at = Some(now + base_delay * multiplier);
+        } else {
+            job.state = JobState::Dead;
+            job.retry_at = None;
+        }
+        Ok(())
+    }
+
+    pub fn get_state(&self, id: JobId) -> Option<JobState> {
+        self.jobs.get(&id).map(|j| j.state)
+    }
+}
+
+```
+
+SCORING RUBRIC
+
+Score the code on four dimensions, each integer from 0 to 3. Be calibrated
+and strict — most production code is not 3/3. Score the code as written,
+not what you imagine it could become.
+
+== type_expressiveness ==
+How well does the code encode the domain in Rust's type system?
+- 0: Heavy stringly-typed or raw-primitive use where a domain type fits
+     (String error messages instead of typed variants, raw u64 for IDs,
+     booleans for multi-state things).
+- 1: Some types but inconsistent — typed where convenient, untyped where lazy.
+- 2: Mostly typed: enums for discrete states, newtypes for IDs; some
+     opportunities still missed.
+- 3: Thorough domain modeling; every meaningful distinction has a type;
+     no avoidable string-typed or boolean-tagged data.
+
+== error_handling ==
+How disciplined is error handling?
+- 0: Library code uses unwrap(), panic!, or unimplemented! for situations
+     that should produce errors.
+- 1: Returns Result, but error type is String or has uninformative variants.
+- 2: Typed error enum with distinguishing variants; library mostly avoids
+     panicking; occasional unwrap/expect without documented reason.
+- 3: Typed error enum with variants that meaningfully distinguish failure
+     modes; library never panics; any expect/unwrap has a documented reason.
+
+== api_ergonomics ==
+How polished is the public API?
+- 0: Public surface leaks internals; missing common derives; no Display
+     where useful; no doc comments on public items.
+- 1: API works but choices are awkward (e.g., Box<dyn Error>, inconsistent
+     naming, sparse derives).
+- 2: Clean public surface; sensible derives; doc comments on most public items.
+- 3: Polished — narrow public surface, complete derives, every public item
+     documented, naming consistent with std conventions.
+
+== idiomaticity ==
+Does this read like idiomatic Rust?
+- 0: Java-in-Rust. Manual loops where iterators fit; no ? operator; no
+     derives where they apply; aggressive cloning instead of borrowing.
+- 1: Some idioms but inconsistent. Knows Result/Option but doesn't chain well.
+- 2: Generally idiomatic. Uses ?, iterator methods, derives; some
+     non-idiomatic choices remain.
+- 3: Reads like idiomatic Rust written by an experienced practitioner.
+     matches! where appropriate, expressive iterators, consistent error
+     handling, no unnecessary clones.
+
+Output a single JSON object only — no prose, no markdown fences. The JSON must have exactly these keys with integer scores 0..3:
+
+{
+  "type_expressiveness": {"score": <int>, "justification": "<one sentence>"},
+  "error_handling":      {"score": <int>, "justification": "<one sentence>"},
+  "api_ergonomics":      {"score": <int>, "justification": "<one sentence>"},
+  "idiomaticity":        {"score": <int>, "justification": "<one sentence>"}
+}

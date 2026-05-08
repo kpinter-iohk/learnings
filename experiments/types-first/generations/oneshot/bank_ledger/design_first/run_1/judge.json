@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "bank_ledger",
+  "treatment": "design_first",
+  "run": 1,
+  "type_expressiveness": 2,
+  "error_handling": 3,
+  "api_ergonomics": 2,
+  "idiomaticity": 2,
+  "total": 9,
+  "justifications": {
+    "type_expressiveness": "Newtypes wrap u64 IDs and a typed enum captures errors and account types, though IDs expose their inner u64 via tuple struct visibility and there's no separate balanced-entries type.",
+    "error_handling": "Typed error enum with distinct, informative variants; no panics or unwraps in library code, and overflow is handled via checked_add.",
+    "api_ergonomics": "Clean surface with appropriate derives, Display impl, and a Default impl, but public items lack doc comments.",
+    "idiomaticity": "Generally idiomatic with matches!, map, and Default, but uses manual for-loops and contains_key+insert patterns where iterator chains or entry APIs would be cleaner."
+  }
+}

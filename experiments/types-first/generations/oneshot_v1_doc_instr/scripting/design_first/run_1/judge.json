@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "scripting",
+  "treatment": "design_first",
+  "run": 1,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 2,
+  "idiomaticity": 2,
+  "total": 8,
+  "justifications": {
+    "type_expressiveness": "Good use of enums for Expr, Value, BinOp, UnaryOp, and EvalError variants, but TypeError carries a stringly-typed message rather than structured fields identifying operator and operand types.",
+    "error_handling": "Typed error enums distinguish the required cases and the library never panics on valid use, but TypeError uses a String payload and the unreachable! branches in arithmetic/comparison match arms are undocumented.",
+    "api_ergonomics": "Public items are documented with doc comments, Display/Debug are implemented as required, and derives are sensible, but ParseError fields are pub (leaking representation) and neither error type implements std::error::Error.",
+    "idiomaticity": "Uses ?, matches!, iterator-style env lookup, and derive macros consistently, though the env is a Vec<(String, Value)> with linear scan and several String clones could be avoided with borrowed lookups."
+  }
+}

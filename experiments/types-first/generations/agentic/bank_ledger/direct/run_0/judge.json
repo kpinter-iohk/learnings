@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "bank_ledger",
+  "treatment": "direct",
+  "run": 0,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Newtypes for AccountId/TransactionId and a typed AccountType enum; LedgerError variants are typed but Unbalanced carries a raw i128 rather than a richer structure.",
+    "error_handling": "Typed error enum distinguishes the required failure modes and the library never panics, but uses saturating_add silently instead of detecting overflow as a distinct error.",
+    "api_ergonomics": "Sensible derives and a Default impl, but no doc comments on any public item and Display for unknown account uses Debug formatting of the ID.",
+    "idiomaticity": "Generally idiomatic with iterator-friendly patterns and proper Display impl, though the sum loop could use .iter().map().sum() and balance recomputation is duplicated rather than derived from transactions."
+  }
+}

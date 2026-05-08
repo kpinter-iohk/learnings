@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 3, "justification": "RomanError is a well-modeled enum with distinct variants carrying relevant data (the offending char and out-of-range value), and the domain has no obvious further newtype opportunities."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with meaningfully distinct variants, no panics or unwrap/expect in library code, and the saturating_add guards against overflow."},
+  "api_ergonomics": {"score": 3, "justification": "Narrow surface (two functions plus error type), Debug/Clone/PartialEq/Eq derived, Display implemented, and every public item has a doc comment with crate-level docs as well."},
+  "idiomaticity": {"score": 3, "justification": "Uses a static descending PAIRS table, matches!, iterator-style chars(), labeled continue, and clean borrowing without unnecessary clones — reads like experienced Rust."}
+}

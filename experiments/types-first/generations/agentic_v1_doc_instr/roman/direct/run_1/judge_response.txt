@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses a proper enum with distinguishing variants including a char payload for InvalidCharacter, though the table uses raw tuples rather than a small struct."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with meaningfully distinct variants, no panics or unwraps, and uses map_err appropriately for the canonical check."},
+  "api_ergonomics": {"score": 2, "justification": "Clean narrow surface with sensible derives, Display, and std::error::Error impl, but lacks any doc comments on public items."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with iterators, ?, derives, and Display, though manual indexed while-loop and intermediate Vec allocations could be replaced with more iterator-style code."}
+}

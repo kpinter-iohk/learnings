@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "roman",
+  "treatment": "direct",
+  "run": 1,
+  "type_expressiveness": 2,
+  "error_handling": 3,
+  "api_ergonomics": 2,
+  "idiomaticity": 2,
+  "total": 9,
+  "justifications": {
+    "type_expressiveness": "Uses a proper enum with distinguishing variants including a char payload for InvalidCharacter, though the table uses raw tuples rather than a small struct.",
+    "error_handling": "Typed error enum with meaningfully distinct variants, no panics or unwraps, and uses map_err appropriately for the canonical check.",
+    "api_ergonomics": "Clean narrow surface with sensible derives, Display, and std::error::Error impl, but lacks any doc comments on public items.",
+    "idiomaticity": "Generally idiomatic with iterators, ?, derives, and Display, though manual indexed while-loop and intermediate Vec allocations could be replaced with more iterator-style code."
+  }
+}

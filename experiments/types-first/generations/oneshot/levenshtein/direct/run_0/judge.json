@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "levenshtein",
+  "treatment": "direct",
+  "run": 0,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 2,
+  "idiomaticity": 3,
+  "total": 9,
+  "justifications": {
+    "type_expressiveness": "The domain is inherently numeric (a usize distance) with no meaningful states to model, and the code uses appropriate primitive types throughout.",
+    "error_handling": "The function is total and cannot fail, so no Result is needed; it never panics and avoids unwrap/expect entirely.",
+    "api_ergonomics": "Clean, narrow public surface following std-style naming with helpful internal comments, but the public `distance` function lacks a `///` doc comment describing semantics, properties, and Unicode behavior.",
+    "idiomaticity": "Idiomatic two-row DP with iterator collection, shadowing for the swap, `mem::swap` for row rotation, and concise `min` chaining \u2014 reads like experienced Rust."
+  }
+}

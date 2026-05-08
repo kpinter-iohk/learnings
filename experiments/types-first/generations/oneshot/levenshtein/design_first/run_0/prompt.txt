@@ -1,0 +1,30 @@
+Implement the following in Rust as the contents of a single `lib.rs`. Use only the standard library.
+
+Do this in two steps.
+
+**Step 1.** Design the data types (structs, enums) and public function signatures. Output them with `todo!()` bodies — no real implementations yet.
+
+**Step 2.** Implement the bodies, keeping the type design from step 1. Output the complete `lib.rs` file.
+
+---
+
+Build a Levenshtein distance function in Rust.
+
+Public API:
+
+- `pub fn distance(a: &str, b: &str) -> usize`
+
+Returns the minimum number of single-character insertions, deletions, or substitutions required to transform `a` into `b`.
+
+Operates on Unicode code points (`char`s), not bytes. So `distance("é", "e") == 1` even though "é" is multiple bytes in UTF-8.
+
+Properties (must hold for all inputs):
+- `distance(a, a) == 0` (identity)
+- `distance(a, b) == distance(b, a)` (symmetry)
+- `distance("", a) == a.chars().count()` (insertion-only baseline)
+
+Standard library only. The complete program is one `lib.rs`.
+
+---
+
+Output step 1 first, then step 2 as the complete `lib.rs` file.

@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "levenshtein",
+  "treatment": "design_first",
+  "run": 2,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 2,
+  "idiomaticity": 2,
+  "total": 8,
+  "justifications": {
+    "type_expressiveness": "The DpRow newtype-style struct meaningfully encapsulates the DP-row domain concept, though the problem is too narrow for richer typing and usize is appropriate here.",
+    "error_handling": "The function is total and cannot fail, and the single expect on last() is documented by an invariant message, though no typed error enum exists (none is needed).",
+    "api_ergonomics": "Narrow public surface with consistent naming, but the public distance function lacks a doc comment despite internal helpers being well-documented.",
+    "idiomaticity": "Generally idiomatic with iterators, tuple destructuring, and clear borrowing, but the hand-rolled min3 instead of std::cmp::min or .min() chaining is a mildly non-idiomatic choice."
+  }
+}

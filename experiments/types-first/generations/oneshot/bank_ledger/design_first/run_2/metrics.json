@@ -1,0 +1,17 @@
+{
+  "task": "bank_ledger",
+  "treatment": "design_first",
+  "run": 2,
+  "compile_ok": true,
+  "tests_passed": 15,
+  "tests_total": 15,
+  "clippy_warnings": 6,
+  "loc": 183,
+  "unwrap_count": 7,
+  "panic_count": 4,
+  "todo_count": 0,
+  "unsafe_count": 0,
+  "response_chars": 7352,
+  "code_chars": 5874,
+  "duration_s": 29.039440631866455
+}

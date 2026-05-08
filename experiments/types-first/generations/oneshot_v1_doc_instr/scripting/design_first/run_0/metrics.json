@@ -1,0 +1,17 @@
+{
+  "task": "scripting",
+  "treatment": "design_first",
+  "run": 0,
+  "compile_ok": true,
+  "tests_passed": 24,
+  "tests_total": 24,
+  "clippy_warnings": 16,
+  "loc": 790,
+  "unwrap_count": 14,
+  "panic_count": 2,
+  "todo_count": 0,
+  "unsafe_count": 0,
+  "response_chars": 31577,
+  "code_chars": 26624,
+  "duration_s": 212.17503213882446
+}

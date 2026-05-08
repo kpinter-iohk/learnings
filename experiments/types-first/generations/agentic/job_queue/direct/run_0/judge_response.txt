@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses an enum for state, newtype for JobId, and typed error variants, but Job's retry_at as Option<Instant> rather than encoding state-specific data in the JobState enum leaves some distinctions untyped."},
+  "error_handling": {"score": 2, "justification": "Typed error enum with distinguishing variants and Display impl, but uses assert! in new() and an expect() in checkout() without documented justification."},
+  "api_ergonomics": {"score": 1, "justification": "Reasonable derives and naming, but no doc comments on any public items and JobState lacks Copy/Clone documentation while Queue lacks Debug."},
+  "idiomaticity": {"score": 2, "justification": "Uses ?, derives, and HashMap idiomatically, but the checkout loop awkwardly re-fetches via get_mut after iterating &self.order and clones the payload rather than using matches! or cleaner iterator patterns."}
+}

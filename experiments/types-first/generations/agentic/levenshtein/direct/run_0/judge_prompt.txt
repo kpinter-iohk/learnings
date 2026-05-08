@@ -1,0 +1,115 @@
+You are an expert Rust reviewer scoring a single library implementation against a spec.
+
+The code implements this spec:
+
+---
+Build a Levenshtein distance function in Rust.
+
+Public API:
+
+- `pub fn distance(a: &str, b: &str) -> usize`
+
+Returns the minimum number of single-character insertions, deletions, or substitutions required to transform `a` into `b`.
+
+Operates on Unicode code points (`char`s), not bytes. So `distance("é", "e") == 1` even though "é" is multiple bytes in UTF-8.
+
+Properties (must hold for all inputs):
+- `distance(a, a) == 0` (identity)
+- `distance(a, b) == distance(b, a)` (symmetry)
+- `distance("", a) == a.chars().count()` (insertion-only baseline)
+
+Standard library only. The complete program is one `lib.rs`.
+---
+
+The code:
+
+```rust
+pub fn distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let n = a.len();
+    let m = b.len();
+
+    if n == 0 {
+        return m;
+    }
+    if m == 0 {
+        return n;
+    }
+
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr: Vec<usize> = vec![0; m + 1];
+
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            let deletion = prev[j] + 1;
+            let insertion = curr[j - 1] + 1;
+            let substitution = prev[j - 1] + cost;
+            curr[j] = deletion.min(insertion).min(substitution);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[m]
+}
+
+```
+
+SCORING RUBRIC
+
+Score the code on four dimensions, each integer from 0 to 3. Be calibrated
+and strict — most production code is not 3/3. Score the code as written,
+not what you imagine it could become.
+
+== type_expressiveness ==
+How well does the code encode the domain in Rust's type system?
+- 0: Heavy stringly-typed or raw-primitive use where a domain type fits
+     (String error messages instead of typed variants, raw u64 for IDs,
+     booleans for multi-state things).
+- 1: Some types but inconsistent — typed where convenient, untyped where lazy.
+- 2: Mostly typed: enums for discrete states, newtypes for IDs; some
+     opportunities still missed.
+- 3: Thorough domain modeling; every meaningful distinction has a type;
+     no avoidable string-typed or boolean-tagged data.
+
+== error_handling ==
+How disciplined is error handling?
+- 0: Library code uses unwrap(), panic!, or unimplemented! for situations
+     that should produce errors.
+- 1: Returns Result, but error type is String or has uninformative variants.
+- 2: Typed error enum with distinguishing variants; library mostly avoids
+     panicking; occasional unwrap/expect without documented reason.
+- 3: Typed error enum with variants that meaningfully distinguish failure
+     modes; library never panics; any expect/unwrap has a documented reason.
+
+== api_ergonomics ==
+How polished is the public API?
+- 0: Public surface leaks internals; missing common derives; no Display
+     where useful; no doc comments on public items.
+- 1: API works but choices are awkward (e.g., Box<dyn Error>, inconsistent
+     naming, sparse derives).
+- 2: Clean public surface; sensible derives; doc comments on most public items.
+- 3: Polished — narrow public surface, complete derives, every public item
+     documented, naming consistent with std conventions.
+
+== idiomaticity ==
+Does this read like idiomatic Rust?
+- 0: Java-in-Rust. Manual loops where iterators fit; no ? operator; no
+     derives where they apply; aggressive cloning instead of borrowing.
+- 1: Some idioms but inconsistent. Knows Result/Option but doesn't chain well.
+- 2: Generally idiomatic. Uses ?, iterator methods, derives; some
+     non-idiomatic choices remain.
+- 3: Reads like idiomatic Rust written by an experienced practitioner.
+     matches! where appropriate, expressive iterators, consistent error
+     handling, no unnecessary clones.
+
+Output a single JSON object only — no prose, no markdown fences. The JSON must have exactly these keys with integer scores 0..3:
+
+{
+  "type_expressiveness": {"score": <int>, "justification": "<one sentence>"},
+  "error_handling":      {"score": <int>, "justification": "<one sentence>"},
+  "api_ergonomics":      {"score": <int>, "justification": "<one sentence>"},
+  "idiomaticity":        {"score": <int>, "justification": "<one sentence>"}
+}

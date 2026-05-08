@@ -1,0 +1,17 @@
+{
+  "task": "job_queue",
+  "treatment": "direct",
+  "run": 2,
+  "compile_ok": true,
+  "tests_passed": 15,
+  "tests_total": 15,
+  "clippy_warnings": 9,
+  "loc": 129,
+  "unwrap_count": 0,
+  "panic_count": 0,
+  "todo_count": 0,
+  "unsafe_count": 0,
+  "response_chars": 3718,
+  "code_chars": 3706,
+  "duration_s": 58.889076232910156
+}

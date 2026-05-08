@@ -1,0 +1,197 @@
+You are an expert Rust reviewer scoring a single library implementation against a spec.
+
+The code implements this spec:
+
+---
+Build a Levenshtein distance function in Rust.
+
+Public API:
+
+- `pub fn distance(a: &str, b: &str) -> usize`
+
+Returns the minimum number of single-character insertions, deletions, or substitutions required to transform `a` into `b`.
+
+Operates on Unicode code points (`char`s), not bytes. So `distance("é", "e") == 1` even though "é" is multiple bytes in UTF-8.
+
+Properties (must hold for all inputs):
+- `distance(a, a) == 0` (identity)
+- `distance(a, b) == distance(b, a)` (symmetry)
+- `distance("", a) == a.chars().count()` (insertion-only baseline)
+
+Standard library only. The complete program is one `lib.rs`.
+---
+
+The code:
+
+```rust
+pub fn distance(a: &str, b: &str) -> usize {
+    // Fast paths for empty inputs avoid allocating.
+    if a.is_empty() {
+        return b.chars().count();
+    }
+    if b.is_empty() {
+        return a.chars().count();
+    }
+
+    // Collect once so we can index by position and know the length up front.
+    // Using the shorter string as the "inner" axis keeps the row buffers small.
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+
+    let (short, long) = if a_chars.len() <= b_chars.len() {
+        (&a_chars, &b_chars)
+    } else {
+        (&b_chars, &a_chars)
+    };
+
+    let m = short.len();
+    let n = long.len();
+
+    // Two-row dynamic programming. `prev[j]` is the distance between
+    // `long[..i-1]` and `short[..j]`; `curr[j]` is the distance for
+    // `long[..i]` and `short[..j]`.
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr: Vec<usize> = vec![0; m + 1];
+
+    for i in 1..=n {
+        curr[0] = i;
+        let long_char = long[i - 1];
+
+        for j in 1..=m {
+            let cost = if long_char == short[j - 1] { 0 } else { 1 };
+
+            let deletion = prev[j] + 1;          // drop a char from `long`
+            let insertion = curr[j - 1] + 1;     // insert into `long`
+            let substitution = prev[j - 1] + cost;
+
+            curr[j] = deletion.min(insertion).min(substitution);
+        }
+
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[m]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::distance;
+
+    #[test]
+    fn identity() {
+        assert_eq!(distance("", ""), 0);
+        assert_eq!(distance("a", "a"), 0);
+        assert_eq!(distance("hello", "hello"), 0);
+        assert_eq!(distance("naïveté", "naïveté"), 0);
+    }
+
+    #[test]
+    fn empty_baseline() {
+        assert_eq!(distance("", "abc"), 3);
+        assert_eq!(distance("abc", ""), 3);
+        assert_eq!(distance("", "é"), 1);
+        assert_eq!(distance("", "naïveté"), "naïveté".chars().count());
+    }
+
+    #[test]
+    fn symmetry() {
+        let pairs = [
+            ("kitten", "sitting"),
+            ("flaw", "lawn"),
+            ("gumbo", "gambol"),
+            ("é", "e"),
+            ("abc", ""),
+            ("rosettacode", "raisethysword"),
+        ];
+        for (a, b) in pairs {
+            assert_eq!(distance(a, b), distance(b, a), "asymmetry on ({a:?}, {b:?})");
+        }
+    }
+
+    #[test]
+    fn classic_examples() {
+        assert_eq!(distance("kitten", "sitting"), 3);
+        assert_eq!(distance("flaw", "lawn"), 2);
+        assert_eq!(distance("gumbo", "gambol"), 2);
+        assert_eq!(distance("book", "back"), 2);
+    }
+
+    #[test]
+    fn unicode_code_points() {
+        // "é" is two bytes in UTF-8 but one char.
+        assert_eq!(distance("é", "e"), 1);
+        assert_eq!("é".len(), 2);
+        assert_eq!("é".chars().count(), 1);
+
+        // Emoji are single chars too (when not in a ZWJ sequence).
+        assert_eq!(distance("a🎉b", "ab"), 1);
+        assert_eq!(distance("🎉", ""), 1);
+        assert_eq!(distance("🎉", "🎊"), 1);
+    }
+
+    #[test]
+    fn single_edit_kinds() {
+        assert_eq!(distance("abc", "abcd"), 1); // insertion
+        assert_eq!(distance("abcd", "abc"), 1); // deletion
+        assert_eq!(distance("abc", "abd"), 1); // substitution
+    }
+}
+
+```
+
+SCORING RUBRIC
+
+Score the code on four dimensions, each integer from 0 to 3. Be calibrated
+and strict — most production code is not 3/3. Score the code as written,
+not what you imagine it could become.
+
+== type_expressiveness ==
+How well does the code encode the domain in Rust's type system?
+- 0: Heavy stringly-typed or raw-primitive use where a domain type fits
+     (String error messages instead of typed variants, raw u64 for IDs,
+     booleans for multi-state things).
+- 1: Some types but inconsistent — typed where convenient, untyped where lazy.
+- 2: Mostly typed: enums for discrete states, newtypes for IDs; some
+     opportunities still missed.
+- 3: Thorough domain modeling; every meaningful distinction has a type;
+     no avoidable string-typed or boolean-tagged data.
+
+== error_handling ==
+How disciplined is error handling?
+- 0: Library code uses unwrap(), panic!, or unimplemented! for situations
+     that should produce errors.
+- 1: Returns Result, but error type is String or has uninformative variants.
+- 2: Typed error enum with distinguishing variants; library mostly avoids
+     panicking; occasional unwrap/expect without documented reason.
+- 3: Typed error enum with variants that meaningfully distinguish failure
+     modes; library never panics; any expect/unwrap has a documented reason.
+
+== api_ergonomics ==
+How polished is the public API?
+- 0: Public surface leaks internals; missing common derives; no Display
+     where useful; no doc comments on public items.
+- 1: API works but choices are awkward (e.g., Box<dyn Error>, inconsistent
+     naming, sparse derives).
+- 2: Clean public surface; sensible derives; doc comments on most public items.
+- 3: Polished — narrow public surface, complete derives, every public item
+     documented, naming consistent with std conventions.
+
+== idiomaticity ==
+Does this read like idiomatic Rust?
+- 0: Java-in-Rust. Manual loops where iterators fit; no ? operator; no
+     derives where they apply; aggressive cloning instead of borrowing.
+- 1: Some idioms but inconsistent. Knows Result/Option but doesn't chain well.
+- 2: Generally idiomatic. Uses ?, iterator methods, derives; some
+     non-idiomatic choices remain.
+- 3: Reads like idiomatic Rust written by an experienced practitioner.
+     matches! where appropriate, expressive iterators, consistent error
+     handling, no unnecessary clones.
+
+Output a single JSON object only — no prose, no markdown fences. The JSON must have exactly these keys with integer scores 0..3:
+
+{
+  "type_expressiveness": {"score": <int>, "justification": "<one sentence>"},
+  "error_handling":      {"score": <int>, "justification": "<one sentence>"},
+  "api_ergonomics":      {"score": <int>, "justification": "<one sentence>"},
+  "idiomaticity":        {"score": <int>, "justification": "<one sentence>"}
+}

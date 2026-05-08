@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "job_queue",
+  "treatment": "design_first",
+  "run": 0,
+  "type_expressiveness": 3,
+  "error_handling": 2,
+  "api_ergonomics": 3,
+  "idiomaticity": 2,
+  "total": 10,
+  "justifications": {
+    "type_expressiveness": "Newtype JobId wrapping u64, well-defined JobState enum, typed QueueError variants, and a dedicated CheckedOut handle \u2014 every meaningful distinction has its own type.",
+    "error_handling": "Typed QueueError with distinguishing variants and Display impl; the constructor panics on max_attempts==0 (documented) and an `expect` is used inside checkout with a clear reason, but saturating overflow fallbacks are reasonable.",
+    "api_ergonomics": "Narrow public surface, doc comments on every public item, appropriate derives (Copy/Clone/Eq/Hash/Debug on JobId, PartialEq/Eq/Debug on JobState), Display on the error, and naming follows std conventions.",
+    "idiomaticity": "Generally idiomatic with `?`, `matches!`, iterator/sort use, and proper derives, but checkout collects+sorts all keys on every call and clones the payload rather than using a more efficient lookup or borrow strategy."
+  }
+}

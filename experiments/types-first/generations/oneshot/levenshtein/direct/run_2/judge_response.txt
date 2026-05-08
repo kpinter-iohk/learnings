@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "The domain is a simple numeric function so usize is the natural type, and the code uses appropriate primitives without inventing unnecessary newtypes."},
+  "error_handling": {"score": 3, "justification": "The function is total with no failure modes, never panics, and contains no unwrap/expect calls."},
+  "api_ergonomics": {"score": 1, "justification": "The public function lacks any doc comment despite the spec emphasizing properties, though the signature itself is clean and minimal."},
+  "idiomaticity": {"score": 2, "justification": "Uses iterators, enumerate, mem::swap, and tuple destructuring idiomatically, but the manual three-way min via mutable reassignment instead of std::cmp::min or .min() chains is slightly non-idiomatic."}
+}

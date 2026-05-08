@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "roman",
+  "treatment": "direct",
+  "run": 1,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 2,
+  "idiomaticity": 2,
+  "total": 8,
+  "justifications": {
+    "type_expressiveness": "Uses a well-structured error enum with distinct variants for each failure mode, though the domain itself is simple enough that there's little room for further newtype modeling.",
+    "error_handling": "Typed error enum with meaningfully distinct variants and no panics in library paths, but the wrapping_sub/wrapping_add usage masks potential overflow without documented reasoning.",
+    "api_ergonomics": "Clean public surface with sensible derives (Debug, Clone, PartialEq, Eq) and Display impl, but lacks doc comments on any public items and doesn't implement std::error::Error.",
+    "idiomaticity": "Generally idiomatic with ?, iterator methods, and derives, though re-encoding via to_roman for canonical validation and the wrapping arithmetic are slightly non-idiomatic shortcuts."
+  }
+}

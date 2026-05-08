@@ -1,0 +1,258 @@
+use std::collections::HashMap;
+use std::fmt;
+use std::time::{Duration, Instant};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct JobId(u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobState {
+    Pending,
+    Running,
+    FailedPendingRetry,
+    Succeeded,
+    Dead,
+}
+
+#[derive(Debug)]
+pub enum QueueError {
+    UnknownJob(JobId),
+    NotRunning { id: JobId, state: JobState },
+}
+
+impl fmt::Display for QueueError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            QueueError::UnknownJob(id) => {
+                write!(f, "unknown job id: {:?}", id)
+            }
+            QueueError::NotRunning { id, state } => {
+                write!(
+                    f,
+                    "job {:?} is not in Running state (current state: {:?})",
+                    id, state
+                )
+            }
+        }
+    }
+}
+
+struct Job {
+    payload: String,
+    state: JobState,
+    attempts: u32,
+    retry_at: Option<Instant>,
+    enqueue_order: u64,
+}
+
+pub struct CheckedOut {
+    id: JobId,
+    payload: String,
+}
+
+impl CheckedOut {
+    pub fn id(&self) -> JobId {
+        self.id
+    }
+
+    pub fn payload(&self) -> &str {
+        &self.payload
+    }
+}
+
+pub struct Queue {
+    max_attempts: u32,
+    base_delay: Duration,
+    next_id: u64,
+    next_order: u64,
+    jobs: HashMap<JobId, Job>,
+}
+
+impl Queue {
+    pub fn new(max_attempts: u32, base_delay: Duration) -> Self {
+        assert!(max_attempts >= 1, "max_attempts must be >= 1");
+        Queue {
+            max_attempts,
+            base_delay,
+            next_id: 0,
+            next_order: 0,
+            jobs: HashMap::new(),
+        }
+    }
+
+    pub fn enqueue(&mut self, payload: String) -> JobId {
+        let id = JobId(self.next_id);
+        self.next_id += 1;
+        let order = self.next_order;
+        self.next_order += 1;
+        self.jobs.insert(
+            id,
+            Job {
+                payload,
+                state: JobState::Pending,
+                attempts: 0,
+                retry_at: None,
+                enqueue_order: order,
+            },
+        );
+        id
+    }
+
+    pub fn checkout(&mut self, now: Instant) -> Option<CheckedOut> {
+        let mut best: Option<(u64, JobId)> = None;
+        for (id, job) in self.jobs.iter() {
+            let runnable = match job.state {
+                JobState::Pending => true,
+                JobState::FailedPendingRetry => {
+                    job.retry_at.map_or(false, |t| t <= now)
+                }
+                _ => false,
+            };
+            if runnable {
+                let candidate = (job.enqueue_order, *id);
+                match best {
+                    None => best = Some(candidate),
+                    Some((order, _)) if job.enqueue_order < order => {
+                        best = Some(candidate)
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let (_, id) = best?;
+        let job = self.jobs.get_mut(&id)?;
+        job.state = JobState::Running;
+        job.retry_at = None;
+        Some(CheckedOut {
+            id,
+            payload: job.payload.clone(),
+        })
+    }
+
+    pub fn succeed(&mut self, id: JobId) -> Result<(), QueueError> {
+        let job = self
+            .jobs
+            .get_mut(&id)
+            .ok_or(QueueError::UnknownJob(id))?;
+        if job.state != JobState::Running {
+            return Err(QueueError::NotRunning {
+                id,
+                state: job.state,
+            });
+        }
+        job.state = JobState::Succeeded;
+        Ok(())
+    }
+
+    pub fn fail(&mut self, id: JobId, now: Instant) -> Result<(), QueueError> {
+        let max_attempts = self.max_attempts;
+        let base_delay = self.base_delay;
+        let job = self
+            .jobs
+            .get_mut(&id)
+            .ok_or(QueueError::UnknownJob(id))?;
+        if job.state != JobState::Running {
+            return Err(QueueError::NotRunning {
+                id,
+                state: job.state,
+            });
+        }
+        job.attempts += 1;
+        if job.attempts < max_attempts {
+            let exponent = job.attempts - 1;
+            let multiplier = 2u32.checked_pow(exponent).unwrap_or(u32::MAX);
+            let delay = base_delay
+                .checked_mul(multiplier)
+                .unwrap_or(Duration::MAX);
+            let retry_at = now.checked_add(delay).unwrap_or_else(|| {
+                // Fallback: very large but representable instant.
+                now + Duration::from_secs(u64::MAX / 2)
+            });
+            job.retry_at = Some(retry_at);
+            job.state = JobState::FailedPendingRetry;
+        } else {
+            job.retry_at = None;
+            job.state = JobState::Dead;
+        }
+        Ok(())
+    }
+
+    pub fn get_state(&self, id: JobId) -> Option<JobState> {
+        self.jobs.get(&id).map(|j| j.state)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enqueue_and_state() {
+        let mut q = Queue::new(3, Duration::from_secs(1));
+        let id = q.enqueue("hello".to_string());
+        assert_eq!(q.get_state(id), Some(JobState::Pending));
+    }
+
+    #[test]
+    fn checkout_runs_and_succeed() {
+        let mut q = Queue::new(3, Duration::from_secs(1));
+        let id = q.enqueue("payload".to_string());
+        let now = Instant::now();
+        let co = q.checkout(now).unwrap();
+        assert_eq!(co.id(), id);
+        assert_eq!(co.payload(), "payload");
+        assert_eq!(q.get_state(id), Some(JobState::Running));
+        assert!(q.checkout(now).is_none());
+        q.succeed(id).unwrap();
+        assert_eq!(q.get_state(id), Some(JobState::Succeeded));
+    }
+
+    #[test]
+    fn fail_then_retry() {
+        let mut q = Queue::new(3, Duration::from_secs(1));
+        let id = q.enqueue("p".to_string());
+        let t0 = Instant::now();
+        let _ = q.checkout(t0).unwrap();
+        q.fail(id, t0).unwrap();
+        assert_eq!(q.get_state(id), Some(JobState::FailedPendingRetry));
+        // Not yet retryable
+        assert!(q.checkout(t0).is_none());
+        // After base_delay it should be runnable
+        let t1 = t0 + Duration::from_secs(1);
+        let co = q.checkout(t1).unwrap();
+        assert_eq!(co.id(), id);
+    }
+
+    #[test]
+    fn dead_after_max_attempts() {
+        let mut q = Queue::new(2, Duration::from_millis(10));
+        let id = q.enqueue("x".to_string());
+        let t0 = Instant::now();
+        let _ = q.checkout(t0).unwrap();
+        q.fail(id, t0).unwrap();
+        let t1 = t0 + Duration::from_millis(20);
+        let _ = q.checkout(t1).unwrap();
+        q.fail(id, t1).unwrap();
+        assert_eq!(q.get_state(id), Some(JobState::Dead));
+    }
+
+    #[test]
+    fn succeed_on_non_running_errors() {
+        let mut q = Queue::new(2, Duration::from_secs(1));
+        let id = q.enqueue("x".to_string());
+        assert!(q.succeed(id).is_err());
+    }
+
+    #[test]
+    fn fifo_among_pending() {
+        let mut q = Queue::new(2, Duration::from_secs(1));
+        let a = q.enqueue("a".to_string());
+        let b = q.enqueue("b".to_string());
+        let now = Instant::now();
+        let co1 = q.checkout(now).unwrap();
+        assert_eq!(co1.id(), a);
+        let co2 = q.checkout(now).unwrap();
+        assert_eq!(co2.id(), b);
+    }
+}

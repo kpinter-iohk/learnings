@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "roman",
+  "treatment": "direct",
+  "run": 1,
+  "type_expressiveness": 3,
+  "error_handling": 3,
+  "api_ergonomics": 3,
+  "idiomaticity": 2,
+  "total": 11,
+  "justifications": {
+    "type_expressiveness": "RomanError is a well-modeled enum with distinct variants carrying the relevant data (the offending value, character, or string), with no stringly-typed shortcuts.",
+    "error_handling": "Typed error variants meaningfully distinguish failure modes, no panics occur on valid inputs, and the two `expect` calls have a clear documented justification tied to the prior validation pass.",
+    "api_ergonomics": "Narrow public surface with module/function/variant doc comments, sensible derives (Debug, Clone, PartialEq, Eq), explicit Display impl, and naming consistent with std conventions.",
+    "idiomaticity": "Generally idiomatic with a clean greedy table and matches! in tests, but the second pass collects chars into a Vec and uses index-based iteration rather than a windows/peekable iterator approach."
+  }
+}

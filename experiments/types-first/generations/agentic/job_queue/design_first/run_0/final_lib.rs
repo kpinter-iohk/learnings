@@ -1,0 +1,162 @@
+use std::collections::HashMap;
+use std::fmt;
+use std::time::{Duration, Instant};
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct JobId(u64);
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum JobState {
+    Pending,
+    Running,
+    FailedPendingRetry,
+    Succeeded,
+    Dead,
+}
+
+#[derive(Debug)]
+pub enum QueueError {
+    UnknownJob,
+    NotRunning,
+}
+
+impl fmt::Display for QueueError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            QueueError::UnknownJob => write!(f, "unknown job id"),
+            QueueError::NotRunning => write!(f, "job is not in Running state"),
+        }
+    }
+}
+
+pub struct CheckedOut {
+    id: JobId,
+    payload: String,
+}
+
+impl CheckedOut {
+    pub fn id(&self) -> JobId {
+        self.id
+    }
+
+    pub fn payload(&self) -> &str {
+        &self.payload
+    }
+}
+
+enum InternalState {
+    Pending,
+    Running,
+    FailedPendingRetry { retry_at: Instant },
+    Succeeded,
+    Dead,
+}
+
+struct Job {
+    payload: String,
+    attempts: u32,
+    state: InternalState,
+}
+
+pub struct Queue {
+    max_attempts: u32,
+    base_delay: Duration,
+    next_id: u64,
+    jobs: HashMap<JobId, Job>,
+    order: Vec<JobId>,
+}
+
+impl Queue {
+    pub fn new(max_attempts: u32, base_delay: Duration) -> Self {
+        assert!(max_attempts >= 1, "max_attempts must be >= 1");
+        Queue {
+            max_attempts,
+            base_delay,
+            next_id: 0,
+            jobs: HashMap::new(),
+            order: Vec::new(),
+        }
+    }
+
+    pub fn enqueue(&mut self, payload: String) -> JobId {
+        let id = JobId(self.next_id);
+        self.next_id += 1;
+        let job = Job {
+            payload,
+            attempts: 0,
+            state: InternalState::Pending,
+        };
+        self.jobs.insert(id, job);
+        self.order.push(id);
+        id
+    }
+
+    pub fn checkout(&mut self, now: Instant) -> Option<CheckedOut> {
+        let mut chosen: Option<JobId> = None;
+        for id in &self.order {
+            let job = match self.jobs.get(id) {
+                Some(j) => j,
+                None => continue,
+            };
+            let runnable = match &job.state {
+                InternalState::Pending => true,
+                InternalState::FailedPendingRetry { retry_at } => *retry_at <= now,
+                _ => false,
+            };
+            if runnable {
+                chosen = Some(*id);
+                break;
+            }
+        }
+        let id = chosen?;
+        let job = self.jobs.get_mut(&id).expect("job present");
+        job.state = InternalState::Running;
+        Some(CheckedOut {
+            id,
+            payload: job.payload.clone(),
+        })
+    }
+
+    pub fn succeed(&mut self, id: JobId) -> Result<(), QueueError> {
+        let job = self.jobs.get_mut(&id).ok_or(QueueError::UnknownJob)?;
+        match job.state {
+            InternalState::Running => {
+                job.state = InternalState::Succeeded;
+                Ok(())
+            }
+            _ => Err(QueueError::NotRunning),
+        }
+    }
+
+    pub fn fail(&mut self, id: JobId, now: Instant) -> Result<(), QueueError> {
+        let job = self.jobs.get_mut(&id).ok_or(QueueError::UnknownJob)?;
+        match job.state {
+            InternalState::Running => {
+                job.attempts += 1;
+                if job.attempts < self.max_attempts {
+                    let shift = job.attempts - 1;
+                    let multiplier: u32 = 1u32.checked_shl(shift).unwrap_or(u32::MAX);
+                    let delay = self.base_delay * multiplier;
+                    job.state = InternalState::FailedPendingRetry {
+                        retry_at: now + delay,
+                    };
+                } else {
+                    job.state = InternalState::Dead;
+                }
+                Ok(())
+            }
+            _ => Err(QueueError::NotRunning),
+        }
+    }
+
+    pub fn get_state(&self, id: JobId) -> Option<JobState> {
+        let job = self.jobs.get(&id)?;
+        Some(match job.state {
+            InternalState::Pending => JobState::Pending,
+            InternalState::Running => JobState::Running,
+            InternalState::FailedPendingRetry { .. } => JobState::FailedPendingRetry,
+            InternalState::Succeeded => JobState::Succeeded,
+            InternalState::Dead => JobState::Dead,
+        })
+    }
+}

@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "RomanError is a well-shaped enum with distinct variants including a payload-bearing InvalidCharacter, though the public API still uses raw u32/String rather than newtype wrappers."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with meaningfully distinct variants, no panics or unwraps in library code, and uses checked_add to avoid overflow panics."},
+  "api_ergonomics": {"score": 2, "justification": "Clean narrow surface with Display, Debug, Clone, Eq derives and std::error::Error impl, but no doc comments on any public items."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with ?, iterator collection, and derives, but the index-based while loop over a Vec<char> instead of a windowed iterator and the secondary canonicalization-by-roundtrip check are slightly non-idiomatic."}
+}

@@ -1,0 +1,227 @@
+You are an expert Rust reviewer scoring a single library implementation against a spec.
+
+The code implements this spec:
+
+---
+Build a Roman numeral converter in Rust.
+
+Public API:
+
+- `pub fn to_roman(n: u32) -> Result<String, RomanError>`
+- `pub fn from_roman(s: &str) -> Result<u32, RomanError>`
+
+Valid range: `1..=3999`. Use subtractive notation: `IV`, `IX`, `XL`, `XC`, `CD`, `CM`. Allowed symbols: `I`, `V`, `X`, `L`, `C`, `D`, `M` (uppercase only).
+
+Errors:
+
+- `to_roman` returns `Err` if `n == 0` or `n > 3999`.
+- `from_roman` returns `Err` for: an empty string; any character other than the seven allowed symbols; or any string that is not the canonical subtractive form for some `n` in `1..=3999` (so `IIII`, `VV`, `IC`, lowercase input — all invalid).
+
+Round-trip property: for every `n` in `1..=3999`, `from_roman(&to_roman(n)?) == Ok(n)`.
+
+`RomanError` must be a public type implementing `Debug` and `Display`. Its internal shape is your choice.
+
+Standard library only. The complete program is one `lib.rs`.
+---
+
+The code:
+
+```rust
+use std::fmt;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RomanError {
+    OutOfRange,
+    Empty,
+    InvalidCharacter(char),
+    NotCanonical,
+}
+
+impl fmt::Display for RomanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RomanError::OutOfRange => write!(f, "value out of range (must be 1..=3999)"),
+            RomanError::Empty => write!(f, "empty input string"),
+            RomanError::InvalidCharacter(c) => write!(f, "invalid character: {:?}", c),
+            RomanError::NotCanonical => write!(f, "not a canonical Roman numeral"),
+        }
+    }
+}
+
+const PAIRS: [(u32, &str); 13] = [
+    (1000, "M"),
+    (900, "CM"),
+    (500, "D"),
+    (400, "CD"),
+    (100, "C"),
+    (90, "XC"),
+    (50, "L"),
+    (40, "XL"),
+    (10, "X"),
+    (9, "IX"),
+    (5, "V"),
+    (4, "IV"),
+    (1, "I"),
+];
+
+pub fn to_roman(n: u32) -> Result<String, RomanError> {
+    if n == 0 || n > 3999 {
+        return Err(RomanError::OutOfRange);
+    }
+    let mut remaining = n;
+    let mut out = String::new();
+    for &(value, sym) in &PAIRS {
+        while remaining >= value {
+            out.push_str(sym);
+            remaining -= value;
+        }
+    }
+    Ok(out)
+}
+
+fn char_value(c: char) -> Option<u32> {
+    match c {
+        'I' => Some(1),
+        'V' => Some(5),
+        'X' => Some(10),
+        'L' => Some(50),
+        'C' => Some(100),
+        'D' => Some(500),
+        'M' => Some(1000),
+        _ => None,
+    }
+}
+
+pub fn from_roman(s: &str) -> Result<u32, RomanError> {
+    if s.is_empty() {
+        return Err(RomanError::Empty);
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let mut values = Vec::with_capacity(chars.len());
+    for &c in &chars {
+        match char_value(c) {
+            Some(v) => values.push(v),
+            None => return Err(RomanError::InvalidCharacter(c)),
+        }
+    }
+    let mut total: i64 = 0;
+    for i in 0..values.len() {
+        let v = values[i] as i64;
+        let next = values.get(i + 1).copied().unwrap_or(0) as i64;
+        if v < next {
+            total -= v;
+        } else {
+            total += v;
+        }
+    }
+    if total < 1 || total > 3999 {
+        return Err(RomanError::NotCanonical);
+    }
+    let n = total as u32;
+    let canonical = to_roman(n).map_err(|_| RomanError::NotCanonical)?;
+    if canonical != s {
+        return Err(RomanError::NotCanonical);
+    }
+    Ok(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trip_full_range() {
+        for n in 1..=3999u32 {
+            let s = to_roman(n).unwrap();
+            assert_eq!(from_roman(&s), Ok(n));
+        }
+    }
+
+    #[test]
+    fn to_roman_known() {
+        assert_eq!(to_roman(1).unwrap(), "I");
+        assert_eq!(to_roman(4).unwrap(), "IV");
+        assert_eq!(to_roman(9).unwrap(), "IX");
+        assert_eq!(to_roman(40).unwrap(), "XL");
+        assert_eq!(to_roman(90).unwrap(), "XC");
+        assert_eq!(to_roman(400).unwrap(), "CD");
+        assert_eq!(to_roman(900).unwrap(), "CM");
+        assert_eq!(to_roman(3999).unwrap(), "MMMCMXCIX");
+        assert_eq!(to_roman(1994).unwrap(), "MCMXCIV");
+    }
+
+    #[test]
+    fn to_roman_out_of_range() {
+        assert!(to_roman(0).is_err());
+        assert!(to_roman(4000).is_err());
+    }
+
+    #[test]
+    fn from_roman_invalid() {
+        assert!(from_roman("").is_err());
+        assert!(from_roman("IIII").is_err());
+        assert!(from_roman("VV").is_err());
+        assert!(from_roman("IC").is_err());
+        assert!(from_roman("iv").is_err());
+        assert!(from_roman("ABC").is_err());
+    }
+}
+
+```
+
+SCORING RUBRIC
+
+Score the code on four dimensions, each integer from 0 to 3. Be calibrated
+and strict — most production code is not 3/3. Score the code as written,
+not what you imagine it could become.
+
+== type_expressiveness ==
+How well does the code encode the domain in Rust's type system?
+- 0: Heavy stringly-typed or raw-primitive use where a domain type fits
+     (String error messages instead of typed variants, raw u64 for IDs,
+     booleans for multi-state things).
+- 1: Some types but inconsistent — typed where convenient, untyped where lazy.
+- 2: Mostly typed: enums for discrete states, newtypes for IDs; some
+     opportunities still missed.
+- 3: Thorough domain modeling; every meaningful distinction has a type;
+     no avoidable string-typed or boolean-tagged data.
+
+== error_handling ==
+How disciplined is error handling?
+- 0: Library code uses unwrap(), panic!, or unimplemented! for situations
+     that should produce errors.
+- 1: Returns Result, but error type is String or has uninformative variants.
+- 2: Typed error enum with distinguishing variants; library mostly avoids
+     panicking; occasional unwrap/expect without documented reason.
+- 3: Typed error enum with variants that meaningfully distinguish failure
+     modes; library never panics; any expect/unwrap has a documented reason.
+
+== api_ergonomics ==
+How polished is the public API?
+- 0: Public surface leaks internals; missing common derives; no Display
+     where useful; no doc comments on public items.
+- 1: API works but choices are awkward (e.g., Box<dyn Error>, inconsistent
+     naming, sparse derives).
+- 2: Clean public surface; sensible derives; doc comments on most public items.
+- 3: Polished — narrow public surface, complete derives, every public item
+     documented, naming consistent with std conventions.
+
+== idiomaticity ==
+Does this read like idiomatic Rust?
+- 0: Java-in-Rust. Manual loops where iterators fit; no ? operator; no
+     derives where they apply; aggressive cloning instead of borrowing.
+- 1: Some idioms but inconsistent. Knows Result/Option but doesn't chain well.
+- 2: Generally idiomatic. Uses ?, iterator methods, derives; some
+     non-idiomatic choices remain.
+- 3: Reads like idiomatic Rust written by an experienced practitioner.
+     matches! where appropriate, expressive iterators, consistent error
+     handling, no unnecessary clones.
+
+Output a single JSON object only — no prose, no markdown fences. The JSON must have exactly these keys with integer scores 0..3:
+
+{
+  "type_expressiveness": {"score": <int>, "justification": "<one sentence>"},
+  "error_handling":      {"score": <int>, "justification": "<one sentence>"},
+  "api_ergonomics":      {"score": <int>, "justification": "<one sentence>"},
+  "idiomaticity":        {"score": <int>, "justification": "<one sentence>"}
+}

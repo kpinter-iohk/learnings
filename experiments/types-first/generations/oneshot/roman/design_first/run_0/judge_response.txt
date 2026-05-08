@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 3, "justification": "RomanError is a well-modeled enum with distinct variants for each failure mode, capturing relevant context without resorting to strings or booleans."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with meaningful variants, no panics in library code, and checked arithmetic guards against overflow."},
+  "api_ergonomics": {"score": 3, "justification": "Narrow public surface, complete derives (Debug, Clone, PartialEq, Eq), Display impl, and doc comments on all public items with module-level docs."},
+  "idiomaticity": {"score": 1, "justification": "The from_roman implementation is convoluted with three layered helper functions where a single iterator/while-loop pass would suffice, including a dead checked_sub branch and confusing control flow that betrays a non-idiomatic structure."}
+}

@@ -1,0 +1,258 @@
+# Step 1: Type Design and Function Signatures
+
+```rust
+//! Levenshtein distance over Unicode code points.
+//!
+//! Computes the minimum number of single-character insertions, deletions,
+//! or substitutions required to transform one string into another.
+
+/// The three edit operations counted by Levenshtein distance.
+///
+/// This enum is internal scaffolding for the algorithm's design; the public
+/// API only exposes the numeric distance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Edit {
+    /// Insert a character into `a` to match `b`.
+    Insert,
+    /// Delete a character from `a`.
+    Delete,
+    /// Substitute one character for another (or match, costing 0).
+    Substitute,
+}
+
+/// A two-row dynamic programming buffer.
+///
+/// The classic Levenshtein DP only needs the previous row and the current
+/// row at any time, so we keep just two `Vec<usize>` rows of length
+/// `b.chars().count() + 1`.
+struct DpRows {
+    /// Previous row (distances for the previous prefix of `a`).
+    prev: Vec<usize>,
+    /// Current row being filled in.
+    curr: Vec<usize>,
+}
+
+impl DpRows {
+    /// Allocate the two rows, sized for a target string with `n` characters.
+    fn new(n: usize) -> Self {
+        todo!()
+    }
+
+    /// Initialize `prev` to `[0, 1, 2, ..., n]` (the "empty source" row).
+    fn init_baseline(&mut self) {
+        todo!()
+    }
+
+    /// Swap `prev` and `curr` so the just-filled `curr` becomes the
+    /// next iteration's `prev`.
+    fn rotate(&mut self) {
+        todo!()
+    }
+}
+
+/// Cost of a single edit. Always 1 in standard Levenshtein.
+fn cost_of(_op: Edit) -> usize {
+    todo!()
+}
+
+/// Compute the Levenshtein distance between `a` and `b`,
+/// measured in Unicode code points (`char`s).
+pub fn distance(a: &str, b: &str) -> usize {
+    todo!()
+}
+```
+
+---
+
+# Step 2: Complete `lib.rs`
+
+```rust
+//! Levenshtein distance over Unicode code points.
+//!
+//! Computes the minimum number of single-character insertions, deletions,
+//! or substitutions required to transform one string into another.
+//!
+//! Standard library only.
+
+/// The three edit operations counted by Levenshtein distance.
+///
+/// Internal scaffolding for the algorithm's design; the public API only
+/// exposes the numeric distance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Edit {
+    /// Insert a character into `a` to match `b`.
+    Insert,
+    /// Delete a character from `a`.
+    Delete,
+    /// Substitute one character for another (or match, costing 0).
+    Substitute,
+}
+
+/// A two-row dynamic programming buffer.
+///
+/// The classic Levenshtein DP only needs the previous row and the current
+/// row at any time, so we keep just two `Vec<usize>` rows of length
+/// `b.chars().count() + 1`.
+struct DpRows {
+    /// Previous row (distances for the previous prefix of `a`).
+    prev: Vec<usize>,
+    /// Current row being filled in.
+    curr: Vec<usize>,
+}
+
+impl DpRows {
+    /// Allocate the two rows, sized for a target string with `n` characters.
+    fn new(n: usize) -> Self {
+        DpRows {
+            prev: vec![0; n + 1],
+            curr: vec![0; n + 1],
+        }
+    }
+
+    /// Initialize `prev` to `[0, 1, 2, ..., n]` (the "empty source" row).
+    fn init_baseline(&mut self) {
+        for j in 0..self.prev.len() {
+            self.prev[j] = j;
+        }
+    }
+
+    /// Swap `prev` and `curr` so the just-filled `curr` becomes the
+    /// next iteration's `prev`.
+    fn rotate(&mut self) {
+        std::mem::swap(&mut self.prev, &mut self.curr);
+    }
+}
+
+/// Cost of a single edit. Always 1 in standard Levenshtein.
+fn cost_of(_op: Edit) -> usize {
+    1
+}
+
+/// Compute the Levenshtein distance between `a` and `b`,
+/// measured in Unicode code points (`char`s).
+///
+/// # Properties
+/// - `distance(a, a) == 0` (identity)
+/// - `distance(a, b) == distance(b, a)` (symmetry)
+/// - `distance("", a) == a.chars().count()` (insertion-only baseline)
+///
+/// # Examples
+/// ```
+/// use levenshtein::distance;
+/// assert_eq!(distance("kitten", "sitting"), 3);
+/// assert_eq!(distance("é", "e"), 1);
+/// assert_eq!(distance("", "abc"), 3);
+/// ```
+pub fn distance(a: &str, b: &str) -> usize {
+    // Collect into chars so we operate on Unicode code points, not bytes.
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+
+    let m = a_chars.len();
+    let n = b_chars.len();
+
+    // Trivial cases.
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
+
+    // Allocate two rows of length n + 1.
+    let mut rows = DpRows::new(n);
+    rows.init_baseline();
+
+    for i in 1..=m {
+        // First column: cost of deleting `i` characters from `a` to reach "".
+        rows.curr[0] = i;
+
+        for j in 1..=n {
+            let same = a_chars[i - 1] == b_chars[j - 1];
+
+            let sub_cost = if same { 0 } else { cost_of(Edit::Substitute) };
+            let del_cost = cost_of(Edit::Delete);
+            let ins_cost = cost_of(Edit::Insert);
+
+            let substitute = rows.prev[j - 1] + sub_cost;
+            let delete = rows.prev[j] + del_cost;
+            let insert = rows.curr[j - 1] + ins_cost;
+
+            rows.curr[j] = min3(substitute, delete, insert);
+        }
+
+        rows.rotate();
+    }
+
+    // After the final rotate, the answer sits in `prev`.
+    rows.prev[n]
+}
+
+/// Minimum of three `usize` values.
+fn min3(x: usize, y: usize, z: usize) -> usize {
+    let xy = if x < y { x } else { y };
+    if xy < z { xy } else { z }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity() {
+        assert_eq!(distance("", ""), 0);
+        assert_eq!(distance("a", "a"), 0);
+        assert_eq!(distance("kitten", "kitten"), 0);
+        assert_eq!(distance("héllo", "héllo"), 0);
+    }
+
+    #[test]
+    fn empty_baseline() {
+        assert_eq!(distance("", "abc"), 3);
+        assert_eq!(distance("abc", ""), 3);
+        assert_eq!(distance("", "héllo"), "héllo".chars().count());
+        assert_eq!(distance("", "🦀🦀🦀"), 3);
+    }
+
+    #[test]
+    fn classic_examples() {
+        assert_eq!(distance("kitten", "sitting"), 3);
+        assert_eq!(distance("flaw", "lawn"), 2);
+        assert_eq!(distance("gumbo", "gambol"), 2);
+        assert_eq!(distance("book", "back"), 2);
+    }
+
+    #[test]
+    fn unicode_code_points() {
+        // "é" is multibyte in UTF-8 but 1 code point.
+        assert_eq!(distance("é", "e"), 1);
+        assert_eq!(distance("café", "cafe"), 1);
+        assert_eq!(distance("🦀", ""), 1);
+        assert_eq!(distance("🦀a", "a🦀"), 2);
+    }
+
+    #[test]
+    fn symmetry() {
+        let pairs = [
+            ("", "abc"),
+            ("kitten", "sitting"),
+            ("café", "cafe"),
+            ("🦀a", "a🦀"),
+            ("abcdef", "azced"),
+        ];
+        for (a, b) in pairs {
+            assert_eq!(distance(a, b), distance(b, a), "symmetry failed: {a:?} {b:?}");
+        }
+    }
+
+    #[test]
+    fn single_edits() {
+        // Insertion.
+        assert_eq!(distance("cat", "cats"), 1);
+        // Deletion.
+        assert_eq!(distance("cats", "cat"), 1);
+        // Substitution.
+        assert_eq!(distance("cat", "bat"), 1);
+    }
+}
+```

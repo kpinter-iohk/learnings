@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses a well-structured enum with meaningfully distinct variants carrying relevant data (OutOfRange(u32), InvalidChar(char)), though the (u32, &str) tuple table could be a typed struct."},
+  "error_handling": {"score": 3, "justification": "Typed enum with four meaningfully distinct variants, no panics in library paths, and the only unwrap()s are documented as safe after prior validation."},
+  "api_ergonomics": {"score": 3, "justification": "Narrow public surface with complete doc comments, sensible derives (Debug, PartialEq, Eq, Clone), Display impl, and naming consistent with std conventions."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with a clean greedy table and iterator validation, but the second pass uses index-based while loops and Vec<char> collection rather than a windowed iterator approach."}
+}

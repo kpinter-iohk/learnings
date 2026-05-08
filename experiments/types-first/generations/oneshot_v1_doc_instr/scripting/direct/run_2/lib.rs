@@ -1,0 +1,760 @@
+use std::fmt;
+
+// ---------------------------------------------------------------------------
+// Public AST types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub enum Expr {
+    Int(i64),
+    Bool(bool),
+    Ident(String),
+    Let(String, Box<Expr>, Box<Expr>),
+    If(Box<Expr>, Box<Expr>, Box<Expr>),
+    BinOp(BinOp, Box<Expr>, Box<Expr>),
+    UnaryOp(UnaryOp, Box<Expr>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    Or,
+    And,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    Not,
+    Neg,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Int(i64),
+    Bool(bool),
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Int(i) => write!(f, "{}", i),
+            Value::Bool(b) => write!(f, "{}", b),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct ParseError {
+    /// Byte offset within the input where parsing failed.
+    pub offset: usize,
+    pub message: String,
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "parse error at offset {}: {}", self.offset, self.message)
+    }
+}
+
+impl fmt::Debug for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ParseError")
+            .field("offset", &self.offset)
+            .field("message", &self.message)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+pub enum EvalError {
+    TypeError(String),
+    DivisionByZero,
+    UnboundIdentifier(String),
+}
+
+impl fmt::Display for EvalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EvalError::TypeError(msg) => write!(f, "type error: {}", msg),
+            EvalError::DivisionByZero => write!(f, "division by zero"),
+            EvalError::UnboundIdentifier(name) => {
+                write!(f, "unbound identifier: {}", name)
+            }
+        }
+    }
+}
+
+impl fmt::Debug for EvalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EvalError::TypeError(msg) => f.debug_tuple("TypeError").field(msg).finish(),
+            EvalError::DivisionByZero => f.write_str("DivisionByZero"),
+            EvalError::UnboundIdentifier(name) => {
+                f.debug_tuple("UnboundIdentifier").field(name).finish()
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Lexer
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+enum Tok {
+    Int(i64),
+    Ident(String),
+    KwLet,
+    KwIn,
+    KwIf,
+    KwThen,
+    KwElse,
+    KwOr,
+    KwAnd,
+    KwNot,
+    KwTrue,
+    KwFalse,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    EqEq,
+    NotEq,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    LParen,
+    RParen,
+    Eof,
+}
+
+#[derive(Debug, Clone)]
+struct Token {
+    tok: Tok,
+    offset: usize,
+}
+
+fn tokenize(input: &str) -> Result<Vec<Token>, ParseError> {
+    let bytes = input.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        // Whitespace
+        if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+
+        // Integer literal
+        if b.is_ascii_digit() {
+            let mut j = i;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                j += 1;
+            }
+            let s = &input[i..j];
+            let n: i64 = s.parse().map_err(|_| ParseError {
+                offset: start,
+                message: format!("invalid integer literal: {}", s),
+            })?;
+            // Disallow `12abc` being silently lexed as `12` then `abc`.
+            if j < bytes.len() {
+                let c = bytes[j];
+                if c == b'_' || c.is_ascii_lowercase() {
+                    return Err(ParseError {
+                        offset: j,
+                        message: format!(
+                            "unexpected character after integer: {:?}",
+                            c as char
+                        ),
+                    });
+                }
+            }
+            tokens.push(Token {
+                tok: Tok::Int(n),
+                offset: start,
+            });
+            i = j;
+            continue;
+        }
+
+        // Identifier or keyword
+        if b == b'_' || b.is_ascii_lowercase() {
+            let mut j = i;
+            while j < bytes.len()
+                && (bytes[j] == b'_'
+                    || bytes[j].is_ascii_lowercase()
+                    || bytes[j].is_ascii_digit())
+            {
+                j += 1;
+            }
+            let s = &input[i..j];
+            let tok = match s {
+                "let" => Tok::KwLet,
+                "in" => Tok::KwIn,
+                "if" => Tok::KwIf,
+                "then" => Tok::KwThen,
+                "else" => Tok::KwElse,
+                "or" => Tok::KwOr,
+                "and" => Tok::KwAnd,
+                "not" => Tok::KwNot,
+                "true" => Tok::KwTrue,
+                "false" => Tok::KwFalse,
+                _ => Tok::Ident(s.to_string()),
+            };
+            tokens.push(Token { tok, offset: start });
+            i = j;
+            continue;
+        }
+
+        // Punctuation / operators
+        let b2 = if i + 1 < bytes.len() { bytes[i + 1] } else { 0 };
+        let two = match (b, b2) {
+            (b'=', b'=') => Some(Tok::EqEq),
+            (b'!', b'=') => Some(Tok::NotEq),
+            (b'<', b'=') => Some(Tok::Le),
+            (b'>', b'=') => Some(Tok::Ge),
+            _ => None,
+        };
+        if let Some(tok) = two {
+            tokens.push(Token { tok, offset: start });
+            i += 2;
+            continue;
+        }
+
+        let tok = match b {
+            b'+' => Tok::Plus,
+            b'-' => Tok::Minus,
+            b'*' => Tok::Star,
+            b'/' => Tok::Slash,
+            b'<' => Tok::Lt,
+            b'>' => Tok::Gt,
+            b'=' => Tok::Eq,
+            b'(' => Tok::LParen,
+            b')' => Tok::RParen,
+            _ => {
+                return Err(ParseError {
+                    offset: start,
+                    message: format!("unexpected character: {:?}", b as char),
+                });
+            }
+        };
+        tokens.push(Token { tok, offset: start });
+        i += 1;
+    }
+
+    tokens.push(Token {
+        tok: Tok::Eof,
+        offset: bytes.len(),
+    });
+    Ok(tokens)
+}
+
+// ---------------------------------------------------------------------------
+// Parser
+// ---------------------------------------------------------------------------
+
+struct Parser<'a> {
+    tokens: &'a [Token],
+    pos: usize,
+}
+
+impl<'a> Parser<'a> {
+    fn peek(&self) -> &Token {
+        &self.tokens[self.pos]
+    }
+
+    fn advance(&mut self) -> Token {
+        let t = self.tokens[self.pos].clone();
+        if self.pos + 1 < self.tokens.len() {
+            self.pos += 1;
+        }
+        t
+    }
+
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        match self.peek().tok {
+            Tok::KwLet => self.parse_let(),
+            Tok::KwIf => self.parse_if(),
+            _ => self.parse_or(),
+        }
+    }
+
+    fn parse_let(&mut self) -> Result<Expr, ParseError> {
+        let _ = self.advance(); // 'let'
+
+        let name_tok = self.advance();
+        let name = match name_tok.tok {
+            Tok::Ident(s) => s,
+            _ => {
+                return Err(ParseError {
+                    offset: name_tok.offset,
+                    message: "expected identifier after 'let'".into(),
+                })
+            }
+        };
+
+        let eq_tok = self.advance();
+        if !matches!(eq_tok.tok, Tok::Eq) {
+            return Err(ParseError {
+                offset: eq_tok.offset,
+                message: "expected '=' in let binding".into(),
+            });
+        }
+
+        let value = self.parse_expr()?;
+
+        let in_tok = self.advance();
+        if !matches!(in_tok.tok, Tok::KwIn) {
+            return Err(ParseError {
+                offset: in_tok.offset,
+                message: "expected 'in' in let binding".into(),
+            });
+        }
+
+        let body = self.parse_expr()?;
+        Ok(Expr::Let(name, Box::new(value), Box::new(body)))
+    }
+
+    fn parse_if(&mut self) -> Result<Expr, ParseError> {
+        let _ = self.advance(); // 'if'
+        let cond = self.parse_expr()?;
+
+        let then_tok = self.advance();
+        if !matches!(then_tok.tok, Tok::KwThen) {
+            return Err(ParseError {
+                offset: then_tok.offset,
+                message: "expected 'then'".into(),
+            });
+        }
+        let then_b = self.parse_expr()?;
+
+        let else_tok = self.advance();
+        if !matches!(else_tok.tok, Tok::KwElse) {
+            return Err(ParseError {
+                offset: else_tok.offset,
+                message: "expected 'else'".into(),
+            });
+        }
+        let else_b = self.parse_expr()?;
+
+        Ok(Expr::If(
+            Box::new(cond),
+            Box::new(then_b),
+            Box::new(else_b),
+        ))
+    }
+
+    fn parse_or(&mut self) -> Result<Expr, ParseError> {
+        let mut lhs = self.parse_and()?;
+        while matches!(self.peek().tok, Tok::KwOr) {
+            self.advance();
+            let rhs = self.parse_and()?;
+            lhs = Expr::BinOp(BinOp::Or, Box::new(lhs), Box::new(rhs));
+        }
+        Ok(lhs)
+    }
+
+    fn parse_and(&mut self) -> Result<Expr, ParseError> {
+        let mut lhs = self.parse_not()?;
+        while matches!(self.peek().tok, Tok::KwAnd) {
+            self.advance();
+            let rhs = self.parse_not()?;
+            lhs = Expr::BinOp(BinOp::And, Box::new(lhs), Box::new(rhs));
+        }
+        Ok(lhs)
+    }
+
+    fn parse_not(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek().tok, Tok::KwNot) {
+            self.advance();
+            let inner = self.parse_not()?;
+            Ok(Expr::UnaryOp(UnaryOp::Not, Box::new(inner)))
+        } else {
+            self.parse_cmp()
+        }
+    }
+
+    fn parse_cmp(&mut self) -> Result<Expr, ParseError> {
+        let lhs = self.parse_add()?;
+        let op = match self.peek().tok {
+            Tok::EqEq => Some(BinOp::Eq),
+            Tok::NotEq => Some(BinOp::Ne),
+            Tok::Lt => Some(BinOp::Lt),
+            Tok::Le => Some(BinOp::Le),
+            Tok::Gt => Some(BinOp::Gt),
+            Tok::Ge => Some(BinOp::Ge),
+            _ => None,
+        };
+        if let Some(op) = op {
+            self.advance();
+            let rhs = self.parse_add()?;
+            Ok(Expr::BinOp(op, Box::new(lhs), Box::new(rhs)))
+        } else {
+            Ok(lhs)
+        }
+    }
+
+    fn parse_add(&mut self) -> Result<Expr, ParseError> {
+        let mut lhs = self.parse_mul()?;
+        loop {
+            let op = match self.peek().tok {
+                Tok::Plus => BinOp::Add,
+                Tok::Minus => BinOp::Sub,
+                _ => break,
+            };
+            self.advance();
+            let rhs = self.parse_mul()?;
+            lhs = Expr::BinOp(op, Box::new(lhs), Box::new(rhs));
+        }
+        Ok(lhs)
+    }
+
+    fn parse_mul(&mut self) -> Result<Expr, ParseError> {
+        let mut lhs = self.parse_unary()?;
+        loop {
+            let op = match self.peek().tok {
+                Tok::Star => BinOp::Mul,
+                Tok::Slash => BinOp::Div,
+                _ => break,
+            };
+            self.advance();
+            let rhs = self.parse_unary()?;
+            lhs = Expr::BinOp(op, Box::new(lhs), Box::new(rhs));
+        }
+        Ok(lhs)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek().tok, Tok::Minus) {
+            self.advance();
+            let inner = self.parse_unary()?;
+            Ok(Expr::UnaryOp(UnaryOp::Neg, Box::new(inner)))
+        } else {
+            self.parse_atom()
+        }
+    }
+
+    fn parse_atom(&mut self) -> Result<Expr, ParseError> {
+        let tok = self.advance();
+        match tok.tok {
+            Tok::Int(n) => Ok(Expr::Int(n)),
+            Tok::KwTrue => Ok(Expr::Bool(true)),
+            Tok::KwFalse => Ok(Expr::Bool(false)),
+            Tok::Ident(s) => Ok(Expr::Ident(s)),
+            Tok::LParen => {
+                let e = self.parse_expr()?;
+                let close = self.advance();
+                if !matches!(close.tok, Tok::RParen) {
+                    return Err(ParseError {
+                        offset: close.offset,
+                        message: "expected ')'".into(),
+                    });
+                }
+                Ok(e)
+            }
+            Tok::Eof => Err(ParseError {
+                offset: tok.offset,
+                message: "unexpected end of input".into(),
+            }),
+            _ => Err(ParseError {
+                offset: tok.offset,
+                message: "unexpected token; expected an expression".into(),
+            }),
+        }
+    }
+}
+
+pub fn parse(input: &str) -> Result<Expr, ParseError> {
+    let tokens = tokenize(input)?;
+    let mut parser = Parser {
+        tokens: &tokens,
+        pos: 0,
+    };
+    let expr = parser.parse_expr()?;
+    let next = parser.peek();
+    if !matches!(next.tok, Tok::Eof) {
+        return Err(ParseError {
+            offset: next.offset,
+            message: "unexpected token after expression".into(),
+        });
+    }
+    Ok(expr)
+}
+
+// ---------------------------------------------------------------------------
+// Evaluator
+// ---------------------------------------------------------------------------
+
+fn lookup(env: &[(String, Value)], name: &str) -> Option<Value> {
+    for (k, v) in env.iter().rev() {
+        if k == name {
+            return Some(v.clone());
+        }
+    }
+    None
+}
+
+fn eval_expr(expr: &Expr, env: &mut Vec<(String, Value)>) -> Result<Value, EvalError> {
+    match expr {
+        Expr::Int(i) => Ok(Value::Int(*i)),
+        Expr::Bool(b) => Ok(Value::Bool(*b)),
+        Expr::Ident(name) => {
+            lookup(env, name).ok_or_else(|| EvalError::UnboundIdentifier(name.clone()))
+        }
+        Expr::Let(name, value, body) => {
+            let v = eval_expr(value, env)?;
+            env.push((name.clone(), v));
+            let result = eval_expr(body, env);
+            env.pop();
+            result
+        }
+        Expr::If(cond, then_b, else_b) => {
+            let c = eval_expr(cond, env)?;
+            match c {
+                Value::Bool(true) => eval_expr(then_b, env),
+                Value::Bool(false) => eval_expr(else_b, env),
+                Value::Int(_) => Err(EvalError::TypeError(
+                    "condition of 'if' must be a bool".into(),
+                )),
+            }
+        }
+        Expr::UnaryOp(op, e) => {
+            let v = eval_expr(e, env)?;
+            match (op, v) {
+                (UnaryOp::Neg, Value::Int(i)) => Ok(Value::Int(i.wrapping_neg())),
+                (UnaryOp::Neg, Value::Bool(_)) => {
+                    Err(EvalError::TypeError("unary '-' expects an int".into()))
+                }
+                (UnaryOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
+                (UnaryOp::Not, Value::Int(_)) => {
+                    Err(EvalError::TypeError("'not' expects a bool".into()))
+                }
+            }
+        }
+        Expr::BinOp(op, lhs, rhs) => match op {
+            // Short-circuit logical operators.
+            BinOp::Or => {
+                let l = eval_expr(lhs, env)?;
+                let lb = match l {
+                    Value::Bool(b) => b,
+                    Value::Int(_) => {
+                        return Err(EvalError::TypeError(
+                            "'or' expects bool operands".into(),
+                        ))
+                    }
+                };
+                if lb {
+                    return Ok(Value::Bool(true));
+                }
+                let r = eval_expr(rhs, env)?;
+                match r {
+                    Value::Bool(b) => Ok(Value::Bool(b)),
+                    Value::Int(_) => Err(EvalError::TypeError(
+                        "'or' expects bool operands".into(),
+                    )),
+                }
+            }
+            BinOp::And => {
+                let l = eval_expr(lhs, env)?;
+                let lb = match l {
+                    Value::Bool(b) => b,
+                    Value::Int(_) => {
+                        return Err(EvalError::TypeError(
+                            "'and' expects bool operands".into(),
+                        ))
+                    }
+                };
+                if !lb {
+                    return Ok(Value::Bool(false));
+                }
+                let r = eval_expr(rhs, env)?;
+                match r {
+                    Value::Bool(b) => Ok(Value::Bool(b)),
+                    Value::Int(_) => Err(EvalError::TypeError(
+                        "'and' expects bool operands".into(),
+                    )),
+                }
+            }
+            _ => {
+                let l = eval_expr(lhs, env)?;
+                let r = eval_expr(rhs, env)?;
+                apply_binop(*op, l, r)
+            }
+        },
+    }
+}
+
+fn apply_binop(op: BinOp, l: Value, r: Value) -> Result<Value, EvalError> {
+    match op {
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+            let (li, ri) = match (l, r) {
+                (Value::Int(a), Value::Int(b)) => (a, b),
+                _ => {
+                    return Err(EvalError::TypeError(
+                        "arithmetic operator expects int operands".into(),
+                    ))
+                }
+            };
+            match op {
+                BinOp::Add => Ok(Value::Int(li.wrapping_add(ri))),
+                BinOp::Sub => Ok(Value::Int(li.wrapping_sub(ri))),
+                BinOp::Mul => Ok(Value::Int(li.wrapping_mul(ri))),
+                BinOp::Div => {
+                    if ri == 0 {
+                        Err(EvalError::DivisionByZero)
+                    } else {
+                        Ok(Value::Int(li.wrapping_div(ri)))
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+        BinOp::Eq | BinOp::Ne => {
+            let same = match (&l, &r) {
+                (Value::Int(a), Value::Int(b)) => a == b,
+                (Value::Bool(a), Value::Bool(b)) => a == b,
+                _ => {
+                    return Err(EvalError::TypeError(
+                        "equality requires both operands to have the same type".into(),
+                    ))
+                }
+            };
+            Ok(Value::Bool(if op == BinOp::Eq { same } else { !same }))
+        }
+        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+            let (li, ri) = match (l, r) {
+                (Value::Int(a), Value::Int(b)) => (a, b),
+                _ => {
+                    return Err(EvalError::TypeError(
+                        "ordering comparison requires int operands".into(),
+                    ))
+                }
+            };
+            let result = match op {
+                BinOp::Lt => li < ri,
+                BinOp::Le => li <= ri,
+                BinOp::Gt => li > ri,
+                BinOp::Ge => li >= ri,
+                _ => unreachable!(),
+            };
+            Ok(Value::Bool(result))
+        }
+        BinOp::Or | BinOp::And => unreachable!(
+            "logical operators are evaluated in eval_expr with short-circuit semantics"
+        ),
+    }
+}
+
+pub fn eval(expr: &Expr) -> Result<Value, EvalError> {
+    let mut env: Vec<(String, Value)> = Vec::new();
+    eval_expr(expr, &mut env)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(src: &str) -> Result<Value, String> {
+        let e = parse(src).map_err(|e| format!("{}", e))?;
+        eval(&e).map_err(|e| format!("{}", e))
+    }
+
+    #[test]
+    fn integer_arithmetic() {
+        assert_eq!(run("1 + 2 * 3").unwrap(), Value::Int(7));
+        assert_eq!(run("(1 + 2) * 3").unwrap(), Value::Int(9));
+        assert_eq!(run("10 - 4 - 2").unwrap(), Value::Int(4));
+        assert_eq!(run("-3 + 5").unwrap(), Value::Int(2));
+        assert_eq!(run("--7").unwrap(), Value::Int(7));
+    }
+
+    #[test]
+    fn booleans_and_comparisons() {
+        assert_eq!(run("true and false").unwrap(), Value::Bool(false));
+        assert_eq!(run("true or false").unwrap(), Value::Bool(true));
+        assert_eq!(run("not true").unwrap(), Value::Bool(false));
+        assert_eq!(run("1 < 2").unwrap(), Value::Bool(true));
+        assert_eq!(run("1 == 1 and 2 != 3").unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn let_and_if() {
+        assert_eq!(
+            run("let x = 1 in let y = 2 in x + y").unwrap(),
+            Value::Int(3)
+        );
+        assert_eq!(
+            run("if 1 < 2 then 10 else 20").unwrap(),
+            Value::Int(10)
+        );
+        assert_eq!(
+            run("let x = true in if x then 1 else 2").unwrap(),
+            Value::Int(1)
+        );
+    }
+
+    #[test]
+    fn type_errors() {
+        assert!(matches!(eval(&parse("1 + true").unwrap()), Err(EvalError::TypeError(_))));
+        assert!(matches!(
+            eval(&parse("if 1 then 2 else 3").unwrap()),
+            Err(EvalError::TypeError(_))
+        ));
+    }
+
+    #[test]
+    fn division_by_zero() {
+        assert!(matches!(
+            eval(&parse("1 / 0").unwrap()),
+            Err(EvalError::DivisionByZero)
+        ));
+    }
+
+    #[test]
+    fn unbound_identifier() {
+        assert!(matches!(
+            eval(&parse("x + 1").unwrap()),
+            Err(EvalError::UnboundIdentifier(_))
+        ));
+    }
+
+    #[test]
+    fn parse_error_offset() {
+        let err = parse("1 + ").unwrap_err();
+        assert_eq!(err.offset, 4);
+        let err = parse("1 + @").unwrap_err();
+        assert_eq!(err.offset, 4);
+    }
+
+    #[test]
+    fn display_value() {
+        assert_eq!(format!("{}", Value::Int(42)), "42");
+        assert_eq!(format!("{}", Value::Int(-3)), "-3");
+        assert_eq!(format!("{}", Value::Bool(true)), "true");
+        assert_eq!(format!("{}", Value::Bool(false)), "false");
+    }
+}

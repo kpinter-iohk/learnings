@@ -1,0 +1,271 @@
+## Step 1 — Type design and signatures
+
+```rust
+//! A Roman numeral converter for integers in `1..=3999`.
+//!
+//! Step 1: shapes only — bodies are `todo!()`.
+
+use std::fmt;
+
+/// Error type for the conversion functions.
+///
+/// The variants distinguish the kinds of failures the public API can
+/// produce, so callers can react to them programmatically.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RomanError {
+    /// The integer was `0` or greater than `3999`.
+    /// Carries the offending value.
+    OutOfRange(u32),
+    /// The input string passed to [`from_roman`] was empty.
+    Empty,
+    /// The input string contained a character that is not one of the
+    /// seven allowed uppercase symbols `I V X L C D M`.
+    InvalidCharacter(char),
+    /// The input string only contained allowed symbols, but it is not
+    /// the canonical subtractive Roman numeral for any value in
+    /// `1..=3999` (e.g. `"IIII"`, `"VV"`, `"IC"`).
+    NonCanonical,
+}
+
+impl fmt::Display for RomanError {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        todo!()
+    }
+}
+
+/// Convert an integer in `1..=3999` to its canonical Roman numeral.
+///
+/// # Errors
+/// Returns [`RomanError::OutOfRange`] if `n == 0` or `n > 3999`.
+pub fn to_roman(n: u32) -> Result<String, RomanError> {
+    todo!()
+}
+
+/// Parse a canonical Roman numeral and return its integer value.
+///
+/// The string must be exactly the canonical subtractive form (e.g.
+/// `"IV"`, not `"IIII"`).
+///
+/// # Errors
+/// * [`RomanError::Empty`] if `s` is empty.
+/// * [`RomanError::InvalidCharacter`] if `s` contains a disallowed
+///   character (anything other than uppercase `I V X L C D M`).
+/// * [`RomanError::NonCanonical`] if `s` is not the canonical
+///   subtractive form of some value in `1..=3999`.
+pub fn from_roman(s: &str) -> Result<u32, RomanError> {
+    todo!()
+}
+```
+
+---
+
+## Step 2 — Complete `lib.rs`
+
+```rust
+//! A Roman numeral converter for integers in `1..=3999`.
+//!
+//! Public API:
+//! * [`to_roman`] — integer → canonical Roman numeral.
+//! * [`from_roman`] — canonical Roman numeral → integer.
+//!
+//! Round-trip property:
+//! for every `n` in `1..=3999`, `from_roman(&to_roman(n)?) == Ok(n)`.
+
+use std::fmt;
+
+/// Error type for the conversion functions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RomanError {
+    /// The integer was `0` or greater than `3999`.
+    OutOfRange(u32),
+    /// The input string passed to [`from_roman`] was empty.
+    Empty,
+    /// The input string contained a character that is not one of the
+    /// seven allowed uppercase symbols `I V X L C D M`.
+    InvalidCharacter(char),
+    /// The input only contained allowed symbols but is not the
+    /// canonical subtractive Roman numeral for any value in
+    /// `1..=3999` (e.g. `"IIII"`, `"VV"`, `"IC"`).
+    NonCanonical,
+}
+
+impl fmt::Display for RomanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RomanError::OutOfRange(n) => {
+                write!(f, "value {} is out of range 1..=3999", n)
+            }
+            RomanError::Empty => write!(f, "input string is empty"),
+            RomanError::InvalidCharacter(c) => {
+                write!(f, "invalid character: {:?}", c)
+            }
+            RomanError::NonCanonical => {
+                write!(f, "input is not a canonical Roman numeral in 1..=3999")
+            }
+        }
+    }
+}
+
+/// The canonical greedy decomposition table, in descending order of
+/// value. Subtractive pairs are interleaved so a left-to-right greedy
+/// match using this table produces the canonical numeral.
+const TABLE: &[(u32, &str)] = &[
+    (1000, "M"),
+    (900, "CM"),
+    (500, "D"),
+    (400, "CD"),
+    (100, "C"),
+    (90, "XC"),
+    (50, "L"),
+    (40, "XL"),
+    (10, "X"),
+    (9, "IX"),
+    (5, "V"),
+    (4, "IV"),
+    (1, "I"),
+];
+
+/// Convert an integer in `1..=3999` to its canonical Roman numeral.
+///
+/// # Errors
+/// Returns [`RomanError::OutOfRange`] if `n == 0` or `n > 3999`.
+pub fn to_roman(n: u32) -> Result<String, RomanError> {
+    if n == 0 || n > 3999 {
+        return Err(RomanError::OutOfRange(n));
+    }
+
+    let mut remaining = n;
+    let mut out = String::new();
+    for &(val, sym) in TABLE {
+        while remaining >= val {
+            out.push_str(sym);
+            remaining -= val;
+        }
+    }
+    Ok(out)
+}
+
+/// Parse a canonical Roman numeral and return its integer value.
+///
+/// # Errors
+/// * [`RomanError::Empty`] if `s` is empty.
+/// * [`RomanError::InvalidCharacter`] if `s` contains a disallowed
+///   character.
+/// * [`RomanError::NonCanonical`] if `s` is not the canonical
+///   subtractive form of some value in `1..=3999`.
+pub fn from_roman(s: &str) -> Result<u32, RomanError> {
+    if s.is_empty() {
+        return Err(RomanError::Empty);
+    }
+
+    // Reject anything that contains a disallowed character. This also
+    // implicitly rejects lowercase input.
+    for c in s.chars() {
+        match c {
+            'I' | 'V' | 'X' | 'L' | 'C' | 'D' | 'M' => {}
+            _ => return Err(RomanError::InvalidCharacter(c)),
+        }
+    }
+
+    // Greedy left-to-right parse using the same canonical table.
+    // Any string that successfully consumes through this loop *and*
+    // round-trips through `to_roman` is by definition canonical.
+    let mut total: u32 = 0;
+    let mut rest: &str = s;
+    for &(val, sym) in TABLE {
+        while rest.starts_with(sym) {
+            total = match total.checked_add(val) {
+                Some(t) => t,
+                None => return Err(RomanError::NonCanonical),
+            };
+            rest = &rest[sym.len()..];
+        }
+    }
+
+    // If anything is left over, the input was not parsable as a
+    // sequence of canonical tokens (e.g. "IC" leaves "C" behind after
+    // consuming "I").
+    if !rest.is_empty() {
+        return Err(RomanError::NonCanonical);
+    }
+
+    // Bound check before round-trip (also guards against weird cases
+    // like an extra-long run of "M"s).
+    if total == 0 || total > 3999 {
+        return Err(RomanError::NonCanonical);
+    }
+
+    // Final canonicity check: the input must be byte-for-byte equal to
+    // what `to_roman` would have produced. This rejects "IIII", "VV",
+    // and any other non-canonical tokenisation that still parsed.
+    let canonical = match to_roman(total) {
+        Ok(c) => c,
+        Err(_) => return Err(RomanError::NonCanonical),
+    };
+    if canonical != s {
+        return Err(RomanError::NonCanonical);
+    }
+
+    Ok(total)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_roman_basic() {
+        assert_eq!(to_roman(1).unwrap(), "I");
+        assert_eq!(to_roman(4).unwrap(), "IV");
+        assert_eq!(to_roman(9).unwrap(), "IX");
+        assert_eq!(to_roman(40).unwrap(), "XL");
+        assert_eq!(to_roman(90).unwrap(), "XC");
+        assert_eq!(to_roman(400).unwrap(), "CD");
+        assert_eq!(to_roman(900).unwrap(), "CM");
+        assert_eq!(to_roman(1994).unwrap(), "MCMXCIV");
+        assert_eq!(to_roman(3999).unwrap(), "MMMCMXCIX");
+    }
+
+    #[test]
+    fn to_roman_out_of_range() {
+        assert_eq!(to_roman(0), Err(RomanError::OutOfRange(0)));
+        assert_eq!(to_roman(4000), Err(RomanError::OutOfRange(4000)));
+        assert_eq!(to_roman(u32::MAX), Err(RomanError::OutOfRange(u32::MAX)));
+    }
+
+    #[test]
+    fn from_roman_basic() {
+        assert_eq!(from_roman("I").unwrap(), 1);
+        assert_eq!(from_roman("IV").unwrap(), 4);
+        assert_eq!(from_roman("MCMXCIV").unwrap(), 1994);
+        assert_eq!(from_roman("MMMCMXCIX").unwrap(), 3999);
+    }
+
+    #[test]
+    fn from_roman_errors() {
+        assert_eq!(from_roman(""), Err(RomanError::Empty));
+        assert_eq!(from_roman("iv"), Err(RomanError::InvalidCharacter('i')));
+        assert_eq!(from_roman("MZ"), Err(RomanError::InvalidCharacter('Z')));
+        assert_eq!(from_roman("IIII"), Err(RomanError::NonCanonical));
+        assert_eq!(from_roman("VV"), Err(RomanError::NonCanonical));
+        assert_eq!(from_roman("IC"), Err(RomanError::NonCanonical));
+        assert_eq!(from_roman("MMMM"), Err(RomanError::NonCanonical));
+    }
+
+    #[test]
+    fn round_trip_all() {
+        for n in 1..=3999 {
+            let s = to_roman(n).unwrap();
+            assert_eq!(from_roman(&s), Ok(n), "round trip failed for {}", n);
+        }
+    }
+
+    #[test]
+    fn display_impl() {
+        let _ = format!("{}", RomanError::OutOfRange(0));
+        let _ = format!("{}", RomanError::Empty);
+        let _ = format!("{}", RomanError::InvalidCharacter('q'));
+        let _ = format!("{}", RomanError::NonCanonical);
+    }
+}
+```

@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "The domain is intrinsically numeric (a usize distance between two strings), so usize and &str are appropriate; there's no avoidable stringly-typed data, though no newtype wrapper distinguishes the result."},
+  "error_handling": {"score": 3, "justification": "The function is total—every input has a valid answer—so no Result is needed, and the code never panics, unwraps, or uses expect."},
+  "api_ergonomics": {"score": 2, "justification": "Narrow surface (one well-named function) with sensible signature, but the public `distance` lacks a doc comment while internal helpers are documented."},
+  "idiomaticity": {"score": 3, "justification": "Clean idiomatic Rust: iterator-based char collection, range iteration, tuple swap, slice borrowing, no unnecessary clones, and a tight space-optimized DP loop."}
+}

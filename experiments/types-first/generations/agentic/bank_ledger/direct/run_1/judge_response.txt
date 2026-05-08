@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Newtype IDs wrap u64, AccountType is a proper enum, and LedgerError variants carry typed payloads, though nothing further distinguishes domain concepts like signed amounts or account names."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with three meaningfully distinct variants carrying contextual data, no panics or unwraps, and proper Display/Debug implementations."},
+  "api_ergonomics": {"score": 2, "justification": "Clean public surface with appropriate derives, Display on the error, and a Default impl, but no doc comments on any public item."},
+  "idiomaticity": {"score": 2, "justification": "Uses iterators, sum, map, pattern matching, and Default idiomatically, but redundantly tracks balance per account while also storing entries, and could use entry/get_mut chaining more tightly."}
+}

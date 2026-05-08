@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Newtype JobId, enum JobState, and typed QueueError cover the main domain distinctions, though Job.retry_at uses Option<Instant> rather than encoding retry-vs-not in the state enum itself."},
+  "error_handling": {"score": 2, "justification": "Typed QueueError with distinct UnknownJob/NotRunning variants and Display impl; uses an undocumented expect(\"job present\") and an assert! in new (panic on invalid input) without doc justification."},
+  "api_ergonomics": {"score": 2, "justification": "Doc comments on all public items, sensible derives, and clean accessors, though CheckedOut lacks Debug and QueueError doesn't implement std::error::Error."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with ?, derives, and ok_or, but uses map_or(false, ...) instead of is_some_and, clones the payload on checkout, and the checkout loop with re-lookup via expect is awkward rather than using a single iterator/find pattern."}
+}

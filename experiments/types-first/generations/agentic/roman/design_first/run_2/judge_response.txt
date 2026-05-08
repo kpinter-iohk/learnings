@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "RomanError is a well-distinguished enum with carrying data (OutOfRange value, InvalidCharacter char), though NotCanonical could be split into more specific variants for better domain modeling."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with meaningful variants, no panics or unwraps in library code, and Result is used consistently throughout."},
+  "api_ergonomics": {"score": 1, "justification": "Sensible derives on the error type and Display is implemented, but no doc comments exist on any public item (functions, error type, or variants)."},
+  "idiomaticity": {"score": 2, "justification": "Uses matches!, iterators, and derives appropriately, but the from_roman parsing does redundant work by both parsing greedily and then re-validating via round-trip to to_roman rather than relying on a single canonical approach."}
+}

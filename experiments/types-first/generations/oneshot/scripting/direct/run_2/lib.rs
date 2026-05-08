@@ -1,0 +1,872 @@
+//! A tiny expression-language evaluator.
+//!
+//! Public API:
+//!   - `parse(input: &str) -> Result<Expr, ParseError>`
+//!   - `eval(expr: &Expr) -> Result<Value, EvalError>`
+
+use std::fmt;
+
+// ============================================================
+// Public types
+// ============================================================
+
+/// A runtime value: either a 64-bit signed integer or a boolean.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Value {
+    Int(i64),
+    Bool(bool),
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Int(n) => write!(f, "{}", n),
+            Value::Bool(b) => write!(f, "{}", b),
+        }
+    }
+}
+
+/// Binary operators present in the AST.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    Or,
+    And,
+    Eq,
+    Neq,
+    Lt,
+    Lte,
+    Gt,
+    Gte,
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+/// Unary operators present in the AST.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    Neg,
+    Not,
+}
+
+/// The abstract syntax tree of an expression.
+#[derive(Debug, Clone)]
+pub enum Expr {
+    Int(i64),
+    Bool(bool),
+    Ident(String),
+    Let {
+        name: String,
+        value: Box<Expr>,
+        body: Box<Expr>,
+    },
+    If {
+        cond: Box<Expr>,
+        then_branch: Box<Expr>,
+        else_branch: Box<Expr>,
+    },
+    BinOp {
+        op: BinOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    UnaryOp {
+        op: UnaryOp,
+        operand: Box<Expr>,
+    },
+}
+
+/// A parsing error, carrying the byte offset within the input where it occurred.
+#[derive(Clone)]
+pub struct ParseError {
+    pub offset: usize,
+    pub message: String,
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "parse error at byte offset {}: {}", self.offset, self.message)
+    }
+}
+
+impl fmt::Debug for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ParseError")
+            .field("offset", &self.offset)
+            .field("message", &self.message)
+            .finish()
+    }
+}
+
+/// Errors that can occur during evaluation.
+#[derive(Clone)]
+pub enum EvalError {
+    /// A type mismatch (e.g. `1 + true`, `if 1 then ...`).
+    TypeError(String),
+    /// Integer division (or modulo) by zero.
+    DivisionByZero,
+    /// Reference to an identifier that is not in scope.
+    UnboundIdent(String),
+}
+
+impl fmt::Display for EvalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EvalError::TypeError(msg) => write!(f, "type error: {}", msg),
+            EvalError::DivisionByZero => write!(f, "division by zero"),
+            EvalError::UnboundIdent(name) => write!(f, "unbound identifier: {}", name),
+        }
+    }
+}
+
+impl fmt::Debug for EvalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EvalError::TypeError(msg) => f.debug_tuple("TypeError").field(msg).finish(),
+            EvalError::DivisionByZero => write!(f, "DivisionByZero"),
+            EvalError::UnboundIdent(name) => f.debug_tuple("UnboundIdent").field(name).finish(),
+        }
+    }
+}
+
+// ============================================================
+// Lexer
+// ============================================================
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Tok {
+    Int(i64),
+    Ident(String),
+    // Keywords
+    Let,
+    In,
+    If,
+    Then,
+    Else,
+    Or,
+    And,
+    Not,
+    True,
+    False,
+    // Operators
+    EqEq,
+    NotEq,
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Assign,
+    LParen,
+    RParen,
+    Eof,
+}
+
+#[derive(Debug, Clone)]
+struct TokenInfo {
+    tok: Tok,
+    offset: usize,
+}
+
+struct Lexer<'a> {
+    input: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Lexer<'a> {
+    fn new(input: &'a str) -> Self {
+        Lexer {
+            input: input.as_bytes(),
+            pos: 0,
+        }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self.pos < self.input.len() {
+            let c = self.input[self.pos];
+            if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn next_token(&mut self) -> Result<TokenInfo, ParseError> {
+        self.skip_whitespace();
+        let offset = self.pos;
+        if self.pos >= self.input.len() {
+            return Ok(TokenInfo {
+                tok: Tok::Eof,
+                offset,
+            });
+        }
+        let c = self.input[self.pos];
+        match c {
+            b'0'..=b'9' => {
+                let start = self.pos;
+                while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
+                    self.pos += 1;
+                }
+                let s = std::str::from_utf8(&self.input[start..self.pos]).unwrap();
+                let n: i64 = s.parse().map_err(|_| ParseError {
+                    offset: start,
+                    message: format!("integer literal out of range: {}", s),
+                })?;
+                Ok(TokenInfo {
+                    tok: Tok::Int(n),
+                    offset,
+                })
+            }
+            b'a'..=b'z' | b'_' => {
+                let start = self.pos;
+                while self.pos < self.input.len() {
+                    let cc = self.input[self.pos];
+                    if (b'a'..=b'z').contains(&cc)
+                        || (b'0'..=b'9').contains(&cc)
+                        || cc == b'_'
+                    {
+                        self.pos += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let s = std::str::from_utf8(&self.input[start..self.pos]).unwrap();
+                let tok = match s {
+                    "let" => Tok::Let,
+                    "in" => Tok::In,
+                    "if" => Tok::If,
+                    "then" => Tok::Then,
+                    "else" => Tok::Else,
+                    "or" => Tok::Or,
+                    "and" => Tok::And,
+                    "not" => Tok::Not,
+                    "true" => Tok::True,
+                    "false" => Tok::False,
+                    other => Tok::Ident(other.to_string()),
+                };
+                Ok(TokenInfo { tok, offset })
+            }
+            b'=' => {
+                self.pos += 1;
+                if self.pos < self.input.len() && self.input[self.pos] == b'=' {
+                    self.pos += 1;
+                    Ok(TokenInfo {
+                        tok: Tok::EqEq,
+                        offset,
+                    })
+                } else {
+                    Ok(TokenInfo {
+                        tok: Tok::Assign,
+                        offset,
+                    })
+                }
+            }
+            b'!' => {
+                self.pos += 1;
+                if self.pos < self.input.len() && self.input[self.pos] == b'=' {
+                    self.pos += 1;
+                    Ok(TokenInfo {
+                        tok: Tok::NotEq,
+                        offset,
+                    })
+                } else {
+                    Err(ParseError {
+                        offset,
+                        message: "expected '=' after '!'".to_string(),
+                    })
+                }
+            }
+            b'<' => {
+                self.pos += 1;
+                if self.pos < self.input.len() && self.input[self.pos] == b'=' {
+                    self.pos += 1;
+                    Ok(TokenInfo {
+                        tok: Tok::LtEq,
+                        offset,
+                    })
+                } else {
+                    Ok(TokenInfo {
+                        tok: Tok::Lt,
+                        offset,
+                    })
+                }
+            }
+            b'>' => {
+                self.pos += 1;
+                if self.pos < self.input.len() && self.input[self.pos] == b'=' {
+                    self.pos += 1;
+                    Ok(TokenInfo {
+                        tok: Tok::GtEq,
+                        offset,
+                    })
+                } else {
+                    Ok(TokenInfo {
+                        tok: Tok::Gt,
+                        offset,
+                    })
+                }
+            }
+            b'+' => {
+                self.pos += 1;
+                Ok(TokenInfo {
+                    tok: Tok::Plus,
+                    offset,
+                })
+            }
+            b'-' => {
+                self.pos += 1;
+                Ok(TokenInfo {
+                    tok: Tok::Minus,
+                    offset,
+                })
+            }
+            b'*' => {
+                self.pos += 1;
+                Ok(TokenInfo {
+                    tok: Tok::Star,
+                    offset,
+                })
+            }
+            b'/' => {
+                self.pos += 1;
+                Ok(TokenInfo {
+                    tok: Tok::Slash,
+                    offset,
+                })
+            }
+            b'(' => {
+                self.pos += 1;
+                Ok(TokenInfo {
+                    tok: Tok::LParen,
+                    offset,
+                })
+            }
+            b')' => {
+                self.pos += 1;
+                Ok(TokenInfo {
+                    tok: Tok::RParen,
+                    offset,
+                })
+            }
+            other => Err(ParseError {
+                offset,
+                message: format!("unexpected character: {:?}", other as char),
+            }),
+        }
+    }
+
+    fn tokenize(&mut self) -> Result<Vec<TokenInfo>, ParseError> {
+        let mut out = Vec::new();
+        loop {
+            let t = self.next_token()?;
+            let done = matches!(t.tok, Tok::Eof);
+            out.push(t);
+            if done {
+                break;
+            }
+        }
+        Ok(out)
+    }
+}
+
+// ============================================================
+// Parser
+// ============================================================
+
+struct Parser {
+    tokens: Vec<TokenInfo>,
+    pos: usize,
+}
+
+impl Parser {
+    fn peek(&self) -> &TokenInfo {
+        &self.tokens[self.pos]
+    }
+
+    fn advance(&mut self) {
+        if self.pos + 1 < self.tokens.len() {
+            self.pos += 1;
+        }
+    }
+
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        match self.peek().tok {
+            Tok::Let => self.parse_let(),
+            Tok::If => self.parse_if(),
+            _ => self.parse_or(),
+        }
+    }
+
+    fn parse_let(&mut self) -> Result<Expr, ParseError> {
+        // 'let'
+        self.advance();
+        let name = match &self.peek().tok {
+            Tok::Ident(s) => s.clone(),
+            _ => {
+                return Err(ParseError {
+                    offset: self.peek().offset,
+                    message: "expected identifier after 'let'".to_string(),
+                })
+            }
+        };
+        self.advance();
+        if !matches!(self.peek().tok, Tok::Assign) {
+            return Err(ParseError {
+                offset: self.peek().offset,
+                message: "expected '=' in 'let'".to_string(),
+            });
+        }
+        self.advance();
+        let value = self.parse_expr()?;
+        if !matches!(self.peek().tok, Tok::In) {
+            return Err(ParseError {
+                offset: self.peek().offset,
+                message: "expected 'in' in 'let'".to_string(),
+            });
+        }
+        self.advance();
+        let body = self.parse_expr()?;
+        Ok(Expr::Let {
+            name,
+            value: Box::new(value),
+            body: Box::new(body),
+        })
+    }
+
+    fn parse_if(&mut self) -> Result<Expr, ParseError> {
+        // 'if'
+        self.advance();
+        let cond = self.parse_expr()?;
+        if !matches!(self.peek().tok, Tok::Then) {
+            return Err(ParseError {
+                offset: self.peek().offset,
+                message: "expected 'then'".to_string(),
+            });
+        }
+        self.advance();
+        let then_branch = self.parse_expr()?;
+        if !matches!(self.peek().tok, Tok::Else) {
+            return Err(ParseError {
+                offset: self.peek().offset,
+                message: "expected 'else'".to_string(),
+            });
+        }
+        self.advance();
+        let else_branch = self.parse_expr()?;
+        Ok(Expr::If {
+            cond: Box::new(cond),
+            then_branch: Box::new(then_branch),
+            else_branch: Box::new(else_branch),
+        })
+    }
+
+    fn parse_or(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_and()?;
+        while matches!(self.peek().tok, Tok::Or) {
+            self.advance();
+            let right = self.parse_and()?;
+            left = Expr::BinOp {
+                op: BinOp::Or,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_and(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_not()?;
+        while matches!(self.peek().tok, Tok::And) {
+            self.advance();
+            let right = self.parse_not()?;
+            left = Expr::BinOp {
+                op: BinOp::And,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_not(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek().tok, Tok::Not) {
+            self.advance();
+            let operand = self.parse_not()?;
+            Ok(Expr::UnaryOp {
+                op: UnaryOp::Not,
+                operand: Box::new(operand),
+            })
+        } else {
+            self.parse_cmp()
+        }
+    }
+
+    fn parse_cmp(&mut self) -> Result<Expr, ParseError> {
+        let left = self.parse_add()?;
+        let op = match self.peek().tok {
+            Tok::EqEq => Some(BinOp::Eq),
+            Tok::NotEq => Some(BinOp::Neq),
+            Tok::Lt => Some(BinOp::Lt),
+            Tok::LtEq => Some(BinOp::Lte),
+            Tok::Gt => Some(BinOp::Gt),
+            Tok::GtEq => Some(BinOp::Gte),
+            _ => None,
+        };
+        if let Some(op) = op {
+            self.advance();
+            let right = self.parse_add()?;
+            Ok(Expr::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            })
+        } else {
+            Ok(left)
+        }
+    }
+
+    fn parse_add(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_mul()?;
+        loop {
+            let op = match self.peek().tok {
+                Tok::Plus => BinOp::Add,
+                Tok::Minus => BinOp::Sub,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_mul()?;
+            left = Expr::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_mul(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_unary()?;
+        loop {
+            let op = match self.peek().tok {
+                Tok::Star => BinOp::Mul,
+                Tok::Slash => BinOp::Div,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_unary()?;
+            left = Expr::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek().tok, Tok::Minus) {
+            self.advance();
+            let operand = self.parse_unary()?;
+            Ok(Expr::UnaryOp {
+                op: UnaryOp::Neg,
+                operand: Box::new(operand),
+            })
+        } else {
+            self.parse_atom()
+        }
+    }
+
+    fn parse_atom(&mut self) -> Result<Expr, ParseError> {
+        let info = self.peek().clone();
+        match info.tok {
+            Tok::Int(n) => {
+                self.advance();
+                Ok(Expr::Int(n))
+            }
+            Tok::True => {
+                self.advance();
+                Ok(Expr::Bool(true))
+            }
+            Tok::False => {
+                self.advance();
+                Ok(Expr::Bool(false))
+            }
+            Tok::Ident(name) => {
+                self.advance();
+                Ok(Expr::Ident(name))
+            }
+            Tok::LParen => {
+                self.advance();
+                let inner = self.parse_expr()?;
+                if !matches!(self.peek().tok, Tok::RParen) {
+                    return Err(ParseError {
+                        offset: self.peek().offset,
+                        message: "expected ')'".to_string(),
+                    });
+                }
+                self.advance();
+                Ok(inner)
+            }
+            Tok::Eof => Err(ParseError {
+                offset: info.offset,
+                message: "unexpected end of input, expected expression".to_string(),
+            }),
+            _ => Err(ParseError {
+                offset: info.offset,
+                message: "expected an atom (integer, boolean, identifier, or '(')".to_string(),
+            }),
+        }
+    }
+}
+
+/// Parse a string of source text into an [`Expr`] tree.
+pub fn parse(input: &str) -> Result<Expr, ParseError> {
+    let mut lexer = Lexer::new(input);
+    let tokens = lexer.tokenize()?;
+    let mut parser = Parser { tokens, pos: 0 };
+    let expr = parser.parse_expr()?;
+    if !matches!(parser.peek().tok, Tok::Eof) {
+        return Err(ParseError {
+            offset: parser.peek().offset,
+            message: "unexpected trailing input after expression".to_string(),
+        });
+    }
+    Ok(expr)
+}
+
+// ============================================================
+// Evaluator
+// ============================================================
+
+/// Evaluate a parsed expression to a [`Value`].
+pub fn eval(expr: &Expr) -> Result<Value, EvalError> {
+    let mut env: Vec<(String, Value)> = Vec::new();
+    eval_with_env(expr, &mut env)
+}
+
+fn lookup(env: &[(String, Value)], name: &str) -> Option<Value> {
+    for (n, v) in env.iter().rev() {
+        if n == name {
+            return Some(v.clone());
+        }
+    }
+    None
+}
+
+fn eval_with_env(expr: &Expr, env: &mut Vec<(String, Value)>) -> Result<Value, EvalError> {
+    match expr {
+        Expr::Int(n) => Ok(Value::Int(*n)),
+        Expr::Bool(b) => Ok(Value::Bool(*b)),
+        Expr::Ident(name) => match lookup(env, name) {
+            Some(v) => Ok(v),
+            None => Err(EvalError::UnboundIdent(name.clone())),
+        },
+        Expr::Let { name, value, body } => {
+            let v = eval_with_env(value, env)?;
+            env.push((name.clone(), v));
+            let result = eval_with_env(body, env);
+            env.pop();
+            result
+        }
+        Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            let c = eval_with_env(cond, env)?;
+            match c {
+                Value::Bool(true) => eval_with_env(then_branch, env),
+                Value::Bool(false) => eval_with_env(else_branch, env),
+                Value::Int(_) => Err(EvalError::TypeError(
+                    "condition of 'if' must be a boolean".to_string(),
+                )),
+            }
+        }
+        Expr::UnaryOp { op, operand } => {
+            let v = eval_with_env(operand, env)?;
+            match (op, v) {
+                (UnaryOp::Neg, Value::Int(n)) => Ok(Value::Int(n.wrapping_neg())),
+                (UnaryOp::Neg, Value::Bool(_)) => Ok(Err(EvalError::TypeError(
+                    "unary '-' requires an integer".to_string(),
+                ))?),
+                (UnaryOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
+                (UnaryOp::Not, Value::Int(_)) => Err(EvalError::TypeError(
+                    "'not' requires a boolean".to_string(),
+                )),
+            }
+        }
+        Expr::BinOp { op, left, right } => match op {
+            // Short-circuit logical operators (left side must still be a bool).
+            BinOp::And => {
+                let lv = eval_with_env(left, env)?;
+                match lv {
+                    Value::Bool(false) => Ok(Value::Bool(false)),
+                    Value::Bool(true) => {
+                        let rv = eval_with_env(right, env)?;
+                        match rv {
+                            Value::Bool(b) => Ok(Value::Bool(b)),
+                            _ => Err(EvalError::TypeError(
+                                "right operand of 'and' must be a boolean".to_string(),
+                            )),
+                        }
+                    }
+                    Value::Int(_) => Err(EvalError::TypeError(
+                        "left operand of 'and' must be a boolean".to_string(),
+                    )),
+                }
+            }
+            BinOp::Or => {
+                let lv = eval_with_env(left, env)?;
+                match lv {
+                    Value::Bool(true) => Ok(Value::Bool(true)),
+                    Value::Bool(false) => {
+                        let rv = eval_with_env(right, env)?;
+                        match rv {
+                            Value::Bool(b) => Ok(Value::Bool(b)),
+                            _ => Err(EvalError::TypeError(
+                                "right operand of 'or' must be a boolean".to_string(),
+                            )),
+                        }
+                    }
+                    Value::Int(_) => Err(EvalError::TypeError(
+                        "left operand of 'or' must be a boolean".to_string(),
+                    )),
+                }
+            }
+            _ => {
+                let lv = eval_with_env(left, env)?;
+                let rv = eval_with_env(right, env)?;
+                apply_binop(*op, lv, rv)
+            }
+        },
+    }
+}
+
+fn apply_binop(op: BinOp, l: Value, r: Value) -> Result<Value, EvalError> {
+    match op {
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => match (l, r) {
+            (Value::Int(a), Value::Int(b)) => match op {
+                BinOp::Add => Ok(Value::Int(a.wrapping_add(b))),
+                BinOp::Sub => Ok(Value::Int(a.wrapping_sub(b))),
+                BinOp::Mul => Ok(Value::Int(a.wrapping_mul(b))),
+                BinOp::Div => {
+                    if b == 0 {
+                        Err(EvalError::DivisionByZero)
+                    } else {
+                        Ok(Value::Int(a.wrapping_div(b)))
+                    }
+                }
+                _ => unreachable!(),
+            },
+            _ => Err(EvalError::TypeError(
+                "arithmetic operators require two integers".to_string(),
+            )),
+        },
+        BinOp::Eq | BinOp::Neq => match (l, r) {
+            (Value::Int(a), Value::Int(b)) => Ok(Value::Bool(if op == BinOp::Eq {
+                a == b
+            } else {
+                a != b
+            })),
+            (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(if op == BinOp::Eq {
+                a == b
+            } else {
+                a != b
+            })),
+            _ => Err(EvalError::TypeError(
+                "equality requires operands of the same type".to_string(),
+            )),
+        },
+        BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte => match (l, r) {
+            (Value::Int(a), Value::Int(b)) => Ok(Value::Bool(match op {
+                BinOp::Lt => a < b,
+                BinOp::Lte => a <= b,
+                BinOp::Gt => a > b,
+                BinOp::Gte => a >= b,
+                _ => unreachable!(),
+            })),
+            _ => Err(EvalError::TypeError(
+                "ordering comparisons require two integers".to_string(),
+            )),
+        },
+        // And / Or are handled by the caller with short-circuiting.
+        BinOp::And | BinOp::Or => unreachable!(),
+    }
+}
+
+// ============================================================
+// Tests
+// ============================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(src: &str) -> Result<Value, String> {
+        match parse(src) {
+            Err(e) => Err(format!("{}", e)),
+            Ok(ast) => eval(&ast).map_err(|e| format!("{}", e)),
+        }
+    }
+
+    #[test]
+    fn integer_literal() {
+        assert_eq!(run("42").unwrap(), Value::Int(42));
+    }
+
+    #[test]
+    fn arithmetic_precedence() {
+        assert_eq!(run("1 + 2 * 3").unwrap(), Value::Int(7));
+        assert_eq!(run("(1 + 2) * 3").unwrap(), Value::Int(9));
+        assert_eq!(run("-3 + 4").unwrap(), Value::Int(1));
+    }
+
+    #[test]
+    fn comparison_and_logic() {
+        assert_eq!(run("1 < 2 and 3 >= 3").unwrap(), Value::Bool(true));
+        assert_eq!(run("not (1 == 2) or false").unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn let_and_if() {
+        assert_eq!(
+            run("let x = 5 in if x > 0 then x * 2 else 0").unwrap(),
+            Value::Int(10),
+        );
+    }
+
+    #[test]
+    fn type_errors() {
+        assert!(run("1 + true").is_err());
+        assert!(run("if 1 then 2 else 3").is_err());
+    }
+
+    #[test]
+    fn division_by_zero() {
+        assert!(run("10 / 0").is_err());
+    }
+
+    #[test]
+    fn unbound() {
+        assert!(run("x + 1").is_err());
+    }
+
+    #[test]
+    fn display_values() {
+        assert_eq!(format!("{}", Value::Int(-3)), "-3");
+        assert_eq!(format!("{}", Value::Int(42)), "42");
+        assert_eq!(format!("{}", Value::Bool(true)), "true");
+        assert_eq!(format!("{}", Value::Bool(false)), "false");
+    }
+
+    #[test]
+    fn parse_error_offset() {
+        let err = parse("1 + ").unwrap_err();
+        assert!(err.offset >= 3);
+    }
+}

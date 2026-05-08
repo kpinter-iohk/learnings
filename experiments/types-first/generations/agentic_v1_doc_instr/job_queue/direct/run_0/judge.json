@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "job_queue",
+  "treatment": "direct",
+  "run": 0,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 1,
+  "total": 6,
+  "justifications": {
+    "type_expressiveness": "Uses a newtype JobId, typed JobState enum, and typed QueueError variants; internal Job struct uses Option<Instant> rather than encoding state-specific data in the enum, leaving some modeling on the table.",
+    "error_handling": "Typed QueueError with distinguishing variants and Display impl; uses an assert! in new() rather than returning a Result, which is a minor panic point without documentation.",
+    "api_ergonomics": "Sensible derives and a Display impl exist, but no doc comments appear on any public item and QueueError lacks a std::error::Error impl.",
+    "idiomaticity": "get_state uses a verbose manual match instead of cloning/copying the enum, checkout clones the payload unnecessarily, and the retry-delay computation manually reimplements shifts rather than using saturating arithmetic idioms."
+  }
+}

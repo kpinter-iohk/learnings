@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "roman",
+  "treatment": "direct",
+  "run": 2,
+  "type_expressiveness": 3,
+  "error_handling": 3,
+  "api_ergonomics": 3,
+  "idiomaticity": 3,
+  "total": 12,
+  "justifications": {
+    "type_expressiveness": "Distinct error variants capture every failure mode (OutOfRange carries the offending value, InvalidCharacter carries the char), with no stringly-typed data and a clean enum-based domain model.",
+    "error_handling": "Typed enum with meaningfully distinct variants, no unwrap/panic in library code, and the sole unreachable! is genuinely unreachable given the prior character validation.",
+    "api_ergonomics": "Narrow public surface, full doc comments on every public item, sensible derives (Debug, Clone, PartialEq, Eq), and a Display impl with informative messages.",
+    "idiomaticity": "Idiomatic use of matches!, ?, checked_add, iterator-driven encoding via a const table, and re-encoding for canonicality is a clean Rust pattern."
+  }
+}

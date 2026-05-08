@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "bank_ledger",
+  "treatment": "direct",
+  "run": 0,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Newtypes for IDs and a proper enum for AccountType and LedgerError, but Account/Transaction internals are plain and there are no further domain distinctions.",
+    "error_handling": "Typed error enum with meaningful variants and Display impl; uses saturating_add silently swallowing overflow rather than reporting it as an error, but never panics.",
+    "api_ergonomics": "Public surface is reasonable with sensible derives and a Default impl, but there are no doc comments on any public item and no std::error::Error impl for LedgerError.",
+    "idiomaticity": "Generally idiomatic with derives, HashMap, and clean match arms, but uses manual for-loops instead of iterator chains (sum/any/find) and saturating_add hides numeric errors instead of using ?."
+  }
+}

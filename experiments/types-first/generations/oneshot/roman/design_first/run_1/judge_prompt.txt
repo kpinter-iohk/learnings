@@ -1,0 +1,263 @@
+You are an expert Rust reviewer scoring a single library implementation against a spec.
+
+The code implements this spec:
+
+---
+Build a Roman numeral converter in Rust.
+
+Public API:
+
+- `pub fn to_roman(n: u32) -> Result<String, RomanError>`
+- `pub fn from_roman(s: &str) -> Result<u32, RomanError>`
+
+Valid range: `1..=3999`. Use subtractive notation: `IV`, `IX`, `XL`, `XC`, `CD`, `CM`. Allowed symbols: `I`, `V`, `X`, `L`, `C`, `D`, `M` (uppercase only).
+
+Errors:
+
+- `to_roman` returns `Err` if `n == 0` or `n > 3999`.
+- `from_roman` returns `Err` for: an empty string; any character other than the seven allowed symbols; or any string that is not the canonical subtractive form for some `n` in `1..=3999` (so `IIII`, `VV`, `IC`, lowercase input — all invalid).
+
+Round-trip property: for every `n` in `1..=3999`, `from_roman(&to_roman(n)?) == Ok(n)`.
+
+`RomanError` must be a public type implementing `Debug` and `Display`. Its internal shape is your choice.
+
+Standard library only. The complete program is one `lib.rs`.
+---
+
+The code:
+
+```rust
+//! Roman numeral converter (1..=3999), canonical subtractive form.
+//! Standard library only.
+
+use std::fmt;
+
+/// Errors returned by `to_roman` and `from_roman`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RomanError {
+    /// `to_roman` was called with `0` or a value greater than `3999`.
+    OutOfRange(u32),
+    /// `from_roman` was given an empty string.
+    Empty,
+    /// `from_roman` saw a character that isn't one of `I V X L C D M`.
+    InvalidCharacter(char),
+    /// The string parses, but isn't the canonical subtractive form
+    /// of any value in `1..=3999` (e.g. `"IIII"`, `"VV"`, `"IC"`).
+    NotCanonical,
+}
+
+impl fmt::Display for RomanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RomanError::OutOfRange(n) => {
+                write!(f, "value {} is out of range (must be 1..=3999)", n)
+            }
+            RomanError::Empty => write!(f, "input string is empty"),
+            RomanError::InvalidCharacter(c) => {
+                write!(f, "invalid Roman numeral character: {:?}", c)
+            }
+            RomanError::NotCanonical => {
+                write!(f, "input is not the canonical Roman numeral form for any value in 1..=3999")
+            }
+        }
+    }
+}
+
+/// Greedy decomposition table, ordered from largest to smallest value.
+const PAIRS: &[(u32, &str)] = &[
+    (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
+    (100,  "C"), (90,  "XC"), (50,  "L"), (40,  "XL"),
+    (10,   "X"), (9,   "IX"), (5,   "V"), (4,   "IV"),
+    (1,    "I"),
+];
+
+fn char_value(c: char) -> Option<u32> {
+    match c {
+        'I' => Some(1),
+        'V' => Some(5),
+        'X' => Some(10),
+        'L' => Some(50),
+        'C' => Some(100),
+        'D' => Some(500),
+        'M' => Some(1000),
+        _ => None,
+    }
+}
+
+/// Convert an integer in `1..=3999` to its canonical Roman numeral.
+pub fn to_roman(n: u32) -> Result<String, RomanError> {
+    if n == 0 || n > 3999 {
+        return Err(RomanError::OutOfRange(n));
+    }
+    let mut out = String::new();
+    let mut remaining = n;
+    for &(value, symbol) in PAIRS {
+        while remaining >= value {
+            out.push_str(symbol);
+            remaining -= value;
+        }
+    }
+    Ok(out)
+}
+
+/// Parse a canonical Roman numeral (uppercase, subtractive form) in `1..=3999`.
+pub fn from_roman(s: &str) -> Result<u32, RomanError> {
+    if s.is_empty() {
+        return Err(RomanError::Empty);
+    }
+
+    // 1. Reject any disallowed characters (this also rejects lowercase).
+    for c in s.chars() {
+        if char_value(c).is_none() {
+            return Err(RomanError::InvalidCharacter(c));
+        }
+    }
+
+    // 2. Numerical pass with subtractive rule:
+    //    if the next symbol is strictly larger, subtract; else add.
+    let chars: Vec<char> = s.chars().collect();
+    let mut total: u32 = 0;
+    let mut i = 0;
+    while i < chars.len() {
+        let v = char_value(chars[i]).expect("validated above");
+        if i + 1 < chars.len() {
+            let next = char_value(chars[i + 1]).expect("validated above");
+            if v < next {
+                total = total.saturating_add(next - v);
+                i += 2;
+                continue;
+            }
+        }
+        total = total.saturating_add(v);
+        i += 1;
+    }
+
+    // 3. Canonical-form check: re-encode and compare.
+    //    This rejects "IIII", "VV", "IC", "MMMM", etc., uniformly.
+    let canonical = match to_roman(total) {
+        Ok(s) => s,
+        Err(_) => return Err(RomanError::NotCanonical),
+    };
+    if canonical != s {
+        return Err(RomanError::NotCanonical);
+    }
+
+    Ok(total)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_values() {
+        assert_eq!(to_roman(1).unwrap(),    "I");
+        assert_eq!(to_roman(4).unwrap(),    "IV");
+        assert_eq!(to_roman(9).unwrap(),    "IX");
+        assert_eq!(to_roman(40).unwrap(),   "XL");
+        assert_eq!(to_roman(90).unwrap(),   "XC");
+        assert_eq!(to_roman(400).unwrap(),  "CD");
+        assert_eq!(to_roman(900).unwrap(),  "CM");
+        assert_eq!(to_roman(1994).unwrap(), "MCMXCIV");
+        assert_eq!(to_roman(3999).unwrap(), "MMMCMXCIX");
+    }
+
+    #[test]
+    fn out_of_range() {
+        assert_eq!(to_roman(0),    Err(RomanError::OutOfRange(0)));
+        assert_eq!(to_roman(4000), Err(RomanError::OutOfRange(4000)));
+    }
+
+    #[test]
+    fn parse_known_values() {
+        assert_eq!(from_roman("I").unwrap(),         1);
+        assert_eq!(from_roman("MCMXCIV").unwrap(),   1994);
+        assert_eq!(from_roman("MMMCMXCIX").unwrap(), 3999);
+    }
+
+    #[test]
+    fn parse_errors() {
+        assert_eq!(from_roman(""),     Err(RomanError::Empty));
+        assert_eq!(from_roman("iv"),   Err(RomanError::InvalidCharacter('i')));
+        assert_eq!(from_roman("IIV"),  Err(RomanError::NotCanonical));
+        assert_eq!(from_roman("IIII"), Err(RomanError::NotCanonical));
+        assert_eq!(from_roman("VV"),   Err(RomanError::NotCanonical));
+        assert_eq!(from_roman("IC"),   Err(RomanError::NotCanonical));
+        assert_eq!(from_roman("MMMM"), Err(RomanError::NotCanonical));
+    }
+
+    #[test]
+    fn roundtrip_full_range() {
+        for n in 1u32..=3999 {
+            let s = to_roman(n).unwrap();
+            assert_eq!(from_roman(&s), Ok(n), "round-trip failed at {}", n);
+        }
+    }
+
+    #[test]
+    fn display_impl() {
+        assert!(format!("{}", RomanError::OutOfRange(0)).contains("out of range"));
+        assert!(format!("{}", RomanError::Empty).contains("empty"));
+        assert!(format!("{}", RomanError::InvalidCharacter('q')).contains("invalid"));
+        assert!(format!("{}", RomanError::NotCanonical).contains("canonical"));
+    }
+}
+
+```
+
+SCORING RUBRIC
+
+Score the code on four dimensions, each integer from 0 to 3. Be calibrated
+and strict — most production code is not 3/3. Score the code as written,
+not what you imagine it could become.
+
+== type_expressiveness ==
+How well does the code encode the domain in Rust's type system?
+- 0: Heavy stringly-typed or raw-primitive use where a domain type fits
+     (String error messages instead of typed variants, raw u64 for IDs,
+     booleans for multi-state things).
+- 1: Some types but inconsistent — typed where convenient, untyped where lazy.
+- 2: Mostly typed: enums for discrete states, newtypes for IDs; some
+     opportunities still missed.
+- 3: Thorough domain modeling; every meaningful distinction has a type;
+     no avoidable string-typed or boolean-tagged data.
+
+== error_handling ==
+How disciplined is error handling?
+- 0: Library code uses unwrap(), panic!, or unimplemented! for situations
+     that should produce errors.
+- 1: Returns Result, but error type is String or has uninformative variants.
+- 2: Typed error enum with distinguishing variants; library mostly avoids
+     panicking; occasional unwrap/expect without documented reason.
+- 3: Typed error enum with variants that meaningfully distinguish failure
+     modes; library never panics; any expect/unwrap has a documented reason.
+
+== api_ergonomics ==
+How polished is the public API?
+- 0: Public surface leaks internals; missing common derives; no Display
+     where useful; no doc comments on public items.
+- 1: API works but choices are awkward (e.g., Box<dyn Error>, inconsistent
+     naming, sparse derives).
+- 2: Clean public surface; sensible derives; doc comments on most public items.
+- 3: Polished — narrow public surface, complete derives, every public item
+     documented, naming consistent with std conventions.
+
+== idiomaticity ==
+Does this read like idiomatic Rust?
+- 0: Java-in-Rust. Manual loops where iterators fit; no ? operator; no
+     derives where they apply; aggressive cloning instead of borrowing.
+- 1: Some idioms but inconsistent. Knows Result/Option but doesn't chain well.
+- 2: Generally idiomatic. Uses ?, iterator methods, derives; some
+     non-idiomatic choices remain.
+- 3: Reads like idiomatic Rust written by an experienced practitioner.
+     matches! where appropriate, expressive iterators, consistent error
+     handling, no unnecessary clones.
+
+Output a single JSON object only — no prose, no markdown fences. The JSON must have exactly these keys with integer scores 0..3:
+
+{
+  "type_expressiveness": {"score": <int>, "justification": "<one sentence>"},
+  "error_handling":      {"score": <int>, "justification": "<one sentence>"},
+  "api_ergonomics":      {"score": <int>, "justification": "<one sentence>"},
+  "idiomaticity":        {"score": <int>, "justification": "<one sentence>"}
+}

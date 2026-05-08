@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "job_queue",
+  "treatment": "design_first",
+  "run": 2,
+  "type_expressiveness": 3,
+  "error_handling": 3,
+  "api_ergonomics": 3,
+  "idiomaticity": 2,
+  "total": 11,
+  "justifications": {
+    "type_expressiveness": "Newtype JobId, typed JobState enum, typed QueueError variants, and an internal Job struct with Option<Instant> for retry timing \u2014 every meaningful distinction has a type.",
+    "error_handling": "Typed QueueError with distinguishing UnknownJob/NotRunning variants, Display implemented, library never panics in normal paths, and the only expect has a documented reason while overflow is handled via saturating arithmetic.",
+    "api_ergonomics": "Narrow public surface, complete derives on JobId/JobState, Display on QueueError, and every public item has a doc comment with consistent std-style naming.",
+    "idiomaticity": "Generally idiomatic with ?, map_or, matches!, and proper derives, but the checkout selection uses a manual loop with awkward match-based min tracking instead of iterators.min_by_key, and payload is cloned rather than borrowed."
+  }
+}

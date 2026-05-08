@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses a newtype JobId, enum JobState, and typed QueueError variants, though Job's retry_at as Option<Instant> conflated with state could be folded into the JobState enum for tighter modeling."},
+  "error_handling": {"score": 2, "justification": "Typed error enum with distinguishing variants (UnknownJob, NotRunning) and Display impl; uses assert! in new() for the precondition rather than returning a Result, but otherwise avoids panics."},
+  "api_ergonomics": {"score": 1, "justification": "Sensible derives on JobState/JobId and Display on QueueError, but no doc comments on any public items and CheckedOut clones the payload unnecessarily."},
+  "idiomaticity": {"score": 2, "justification": "Uses iterators, ?, derives, and map_or appropriately, though the manual 1u32 << exponent overflow guard and payload.clone() in checkout are slightly clunky and matches! could replace the state comparisons."}
+}

@@ -1,0 +1,232 @@
+You are an expert Rust reviewer scoring a single library implementation against a spec.
+
+The code implements this spec:
+
+---
+Build a double-entry ledger in Rust.
+
+The ledger holds accounts and transactions. Each account has a name and a type. Each transaction is a list of entries; each entry references an account and an amount (positive or negative `i64`). The sum of all entries in a transaction must equal zero.
+
+The `AccountType` enum must have exactly these variants (the variant names are part of the public API):
+
+```rust
+pub enum AccountType { Asset, Liability, Equity, Revenue, Expense }
+```
+
+`AccountType` must derive `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`.
+
+Required public API:
+
+- `Ledger::new() -> Self`
+- `ledger.open_account(&mut self, name: String, ty: AccountType) -> AccountId`
+- `ledger.post(&mut self, entries: Vec<(AccountId, i64)>) -> Result<TransactionId, LedgerError>`
+- `ledger.balance(&self, id: AccountId) -> Result<i64, LedgerError>` — sum of all amounts posted to that account
+- `ledger.account_type(&self, id: AccountId) -> Option<AccountType>`
+
+`AccountId` and `TransactionId` are public types whose internal shape is your choice. Both must implement `Copy`, `Clone`, `Eq`, `PartialEq`, `Hash`, `Debug`.
+
+`LedgerError` is a public type whose shape is your choice. It must implement `Debug` and `Display`. It must distinguish at minimum: an unbalanced transaction (entries don't sum to zero), an unknown account reference, and an empty entry list.
+
+Behaviors `post` must enforce:
+- Empty `entries` → error.
+- Any entry referencing an unknown `AccountId` → error.
+- Sum of amounts not equal to zero → error.
+- All accounts known and entries balance → success; transaction is recorded; return a fresh `TransactionId`.
+
+`balance` returns `Err` for an unknown `AccountId`, otherwise returns the sum of amounts posted to that account across all transactions.
+
+`account_type` returns the type of a known account or `None` for an unknown ID.
+
+Standard library only. The complete program is one `lib.rs`.
+---
+
+The code:
+
+```rust
+use std::collections::HashMap;
+use std::fmt;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountType {
+    Asset,
+    Liability,
+    Equity,
+    Revenue,
+    Expense,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AccountId(u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TransactionId(u64);
+
+#[derive(Debug)]
+pub enum LedgerError {
+    EmptyEntries,
+    UnknownAccount(AccountId),
+    Unbalanced(i64),
+}
+
+impl fmt::Display for LedgerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LedgerError::EmptyEntries => write!(f, "transaction has no entries"),
+            LedgerError::UnknownAccount(id) => write!(f, "unknown account: {:?}", id),
+            LedgerError::Unbalanced(sum) => {
+                write!(f, "transaction entries do not sum to zero (sum = {})", sum)
+            }
+        }
+    }
+}
+
+struct Account {
+    #[allow(dead_code)]
+    name: String,
+    ty: AccountType,
+    balance: i64,
+}
+
+struct Transaction {
+    #[allow(dead_code)]
+    entries: Vec<(AccountId, i64)>,
+}
+
+pub struct Ledger {
+    accounts: HashMap<AccountId, Account>,
+    transactions: HashMap<TransactionId, Transaction>,
+    next_account_id: u64,
+    next_transaction_id: u64,
+}
+
+impl Ledger {
+    pub fn new() -> Self {
+        Ledger {
+            accounts: HashMap::new(),
+            transactions: HashMap::new(),
+            next_account_id: 0,
+            next_transaction_id: 0,
+        }
+    }
+
+    pub fn open_account(&mut self, name: String, ty: AccountType) -> AccountId {
+        let id = AccountId(self.next_account_id);
+        self.next_account_id += 1;
+        self.accounts.insert(
+            id,
+            Account {
+                name,
+                ty,
+                balance: 0,
+            },
+        );
+        id
+    }
+
+    pub fn post(
+        &mut self,
+        entries: Vec<(AccountId, i64)>,
+    ) -> Result<TransactionId, LedgerError> {
+        if entries.is_empty() {
+            return Err(LedgerError::EmptyEntries);
+        }
+
+        for (id, _) in &entries {
+            if !self.accounts.contains_key(id) {
+                return Err(LedgerError::UnknownAccount(*id));
+            }
+        }
+
+        let sum: i64 = entries.iter().map(|(_, amt)| *amt).sum();
+        if sum != 0 {
+            return Err(LedgerError::Unbalanced(sum));
+        }
+
+        for (id, amt) in &entries {
+            if let Some(acc) = self.accounts.get_mut(id) {
+                acc.balance += *amt;
+            }
+        }
+
+        let txid = TransactionId(self.next_transaction_id);
+        self.next_transaction_id += 1;
+        self.transactions.insert(txid, Transaction { entries });
+        Ok(txid)
+    }
+
+    pub fn balance(&self, id: AccountId) -> Result<i64, LedgerError> {
+        match self.accounts.get(&id) {
+            Some(acc) => Ok(acc.balance),
+            None => Err(LedgerError::UnknownAccount(id)),
+        }
+    }
+
+    pub fn account_type(&self, id: AccountId) -> Option<AccountType> {
+        self.accounts.get(&id).map(|a| a.ty)
+    }
+}
+
+impl Default for Ledger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+```
+
+SCORING RUBRIC
+
+Score the code on four dimensions, each integer from 0 to 3. Be calibrated
+and strict — most production code is not 3/3. Score the code as written,
+not what you imagine it could become.
+
+== type_expressiveness ==
+How well does the code encode the domain in Rust's type system?
+- 0: Heavy stringly-typed or raw-primitive use where a domain type fits
+     (String error messages instead of typed variants, raw u64 for IDs,
+     booleans for multi-state things).
+- 1: Some types but inconsistent — typed where convenient, untyped where lazy.
+- 2: Mostly typed: enums for discrete states, newtypes for IDs; some
+     opportunities still missed.
+- 3: Thorough domain modeling; every meaningful distinction has a type;
+     no avoidable string-typed or boolean-tagged data.
+
+== error_handling ==
+How disciplined is error handling?
+- 0: Library code uses unwrap(), panic!, or unimplemented! for situations
+     that should produce errors.
+- 1: Returns Result, but error type is String or has uninformative variants.
+- 2: Typed error enum with distinguishing variants; library mostly avoids
+     panicking; occasional unwrap/expect without documented reason.
+- 3: Typed error enum with variants that meaningfully distinguish failure
+     modes; library never panics; any expect/unwrap has a documented reason.
+
+== api_ergonomics ==
+How polished is the public API?
+- 0: Public surface leaks internals; missing common derives; no Display
+     where useful; no doc comments on public items.
+- 1: API works but choices are awkward (e.g., Box<dyn Error>, inconsistent
+     naming, sparse derives).
+- 2: Clean public surface; sensible derives; doc comments on most public items.
+- 3: Polished — narrow public surface, complete derives, every public item
+     documented, naming consistent with std conventions.
+
+== idiomaticity ==
+Does this read like idiomatic Rust?
+- 0: Java-in-Rust. Manual loops where iterators fit; no ? operator; no
+     derives where they apply; aggressive cloning instead of borrowing.
+- 1: Some idioms but inconsistent. Knows Result/Option but doesn't chain well.
+- 2: Generally idiomatic. Uses ?, iterator methods, derives; some
+     non-idiomatic choices remain.
+- 3: Reads like idiomatic Rust written by an experienced practitioner.
+     matches! where appropriate, expressive iterators, consistent error
+     handling, no unnecessary clones.
+
+Output a single JSON object only — no prose, no markdown fences. The JSON must have exactly these keys with integer scores 0..3:
+
+{
+  "type_expressiveness": {"score": <int>, "justification": "<one sentence>"},
+  "error_handling":      {"score": <int>, "justification": "<one sentence>"},
+  "api_ergonomics":      {"score": <int>, "justification": "<one sentence>"},
+  "idiomaticity":        {"score": <int>, "justification": "<one sentence>"}
+}

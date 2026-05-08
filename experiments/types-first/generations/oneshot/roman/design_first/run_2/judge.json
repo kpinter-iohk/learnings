@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "roman",
+  "treatment": "design_first",
+  "run": 2,
+  "type_expressiveness": 3,
+  "error_handling": 3,
+  "api_ergonomics": 3,
+  "idiomaticity": 2,
+  "total": 11,
+  "justifications": {
+    "type_expressiveness": "RomanError is a well-modeled enum with distinct variants carrying relevant payloads, and the (value, symbol) pairs table cleanly encodes the domain without stringly-typed shortcuts.",
+    "error_handling": "Typed enum with meaningfully distinct variants, no panics in library paths, and the single unwrap is explicitly justified by a comment noting prior validation.",
+    "api_ergonomics": "Narrow public surface with doc comments on every public item, sensible derives (Debug, Clone, PartialEq, Eq), Display impl, and naming consistent with std conventions.",
+    "idiomaticity": "Generally idiomatic with iterator-based encoding and clean Display impl, but indexing via `for i in 0..chars.len()` and collecting into a Vec<char> instead of using windows/peekable iteration is slightly non-idiomatic."
+  }
+}

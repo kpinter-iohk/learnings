@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "bank_ledger",
+  "treatment": "direct",
+  "run": 2,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Newtype wrappers for AccountId/TransactionId and a proper enum for AccountType and LedgerError, though the Unbalanced variant carries only a raw i64 sum without distinguishing overflow cases.",
+    "error_handling": "Typed error enum with distinguishing variants and no panics, but use of saturating_add silently masks overflow conditions rather than reporting them as errors.",
+    "api_ergonomics": "Required derives are present and Default is implemented, but there are no doc comments on any public items and Display for LedgerError uses Debug formatting for AccountId.",
+    "idiomaticity": "Generally idiomatic with derives, HashMap, and Default impl, but the sum could be expressed via iterator methods and the unknown-account check followed by get_mut does redundant lookups."
+  }
+}

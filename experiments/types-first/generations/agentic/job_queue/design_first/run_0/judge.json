@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "job_queue",
+  "treatment": "design_first",
+  "run": 0,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Newtype JobId, typed error enum, and a separate internal state enum carrying retry_at are well-modeled, though the public JobState collapses the retry timestamp into a unit variant.",
+    "error_handling": "Typed QueueError with distinguishing variants and Display, but uses assert! in new and an undocumented expect in checkout, plus a silent saturation on shift overflow.",
+    "api_ergonomics": "Reasonable surface and derives, but no doc comments on any public item and JobState lacks Clone/Copy which would be expected for such a small enum.",
+    "idiomaticity": "Uses ?, derives, and Option chaining, but the checkout loop could use iterator methods like find, and matches! would be cleaner than the explicit match arms in succeed/fail."
+  }
+}

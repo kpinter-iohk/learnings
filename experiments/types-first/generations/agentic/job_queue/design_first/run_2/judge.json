@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "job_queue",
+  "treatment": "design_first",
+  "run": 2,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Newtype JobId, public JobState enum, and an internal JobStatus that carries retry_at as data show solid domain modeling, though duplicating public/internal state enums is a minor missed simplification.",
+    "error_handling": "Typed QueueError enum with distinguishing variants and Display impl; uses an assert! in new and an expect in checkout without documented reasoning, falling short of a clean 3.",
+    "api_ergonomics": "Public surface is reasonable with appropriate derives on JobId/JobState, but there are no doc comments on any public items and QueueError doesn't implement std::error::Error.",
+    "idiomaticity": "Uses ?, derives, and pattern matching reasonably well, but the checkout loop is manual rather than iterator-based, clones the payload unnecessarily, and uses an awkward two-pass borrow pattern instead of more idiomatic approaches."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses a newtype JobId, typed JobState enum, and typed QueueError, though the Job struct uses Option<Instant> for retry_at where state-embedded data could be more expressive."},
+  "error_handling": {"score": 2, "justification": "Typed error enum with two distinguishing variants and Display impl; uses expect with a brief comment but no documented panic-freedom guarantee, and the assert in `new` panics rather than returning a Result."},
+  "api_ergonomics": {"score": 1, "justification": "Public surface is reasonable but lacks any doc comments, JobState lacks Copy, QueueError lacks Clone/PartialEq, and there's no Error trait impl for QueueError."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with ?, ok_or, derives, and matches! in tests, though checkout uses a manual loop with double HashMap lookup and clones the payload rather than using iterator find or borrowing."}
+}

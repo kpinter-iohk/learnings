@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses newtypes for AccountId/TransactionId and an enum for AccountType, but stores AccountType discrimination via plain fields and uses saturating_add silently rather than modeling overflow as a typed concern."},
+  "error_handling": {"score": 2, "justification": "Typed error enum with distinguishing variants and Display impl; never panics, but silently saturates on overflow rather than reporting it as an error variant."},
+  "api_ergonomics": {"score": 1, "justification": "Reasonable derives and a Default impl, but no doc comments on any public items and Display for IDs falls back to Debug-style formatting."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with derives, HashMap, and map(), but uses manual indexed loops instead of iterator methods like .iter().any() or .map().sum() and lacks ? chaining opportunities."}
+}

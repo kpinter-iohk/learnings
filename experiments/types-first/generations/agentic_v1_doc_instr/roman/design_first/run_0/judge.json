@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "roman",
+  "treatment": "design_first",
+  "run": 0,
+  "type_expressiveness": 3,
+  "error_handling": 3,
+  "api_ergonomics": 3,
+  "idiomaticity": 3,
+  "total": 12,
+  "justifications": {
+    "type_expressiveness": "Distinct enum variants encode each failure mode (OutOfRange carrying the offending value, Empty, InvalidChar with the bad char, NotCanonical), with no stringly-typed data.",
+    "error_handling": "Typed error enum with meaningfully distinct variants, no panics or unwraps in library code, and uses saturating_add defensively.",
+    "api_ergonomics": "Narrow public surface, Debug/Clone/PartialEq/Eq derives, Display impl, and doc comments on every public item with std-conventional naming.",
+    "idiomaticity": "Uses matches!, iterator-based table lookup, idiomatic enum error handling, and avoids unnecessary clones, though the round-trip re-encoding check is a slightly heavyweight canonicality test."
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "bank_ledger",
+  "treatment": "design_first",
+  "run": 0,
+  "type_expressiveness": 3,
+  "error_handling": 3,
+  "api_ergonomics": 3,
+  "idiomaticity": 3,
+  "total": 12,
+  "justifications": {
+    "type_expressiveness": "Uses newtypes for AccountId and TransactionId, a proper enum for AccountType, and a typed error enum with informative variants including the unbalanced sum.",
+    "error_handling": "Typed error enum with three meaningfully distinct variants, no panics in library code, and the only unwrap is on a HashMap lookup with an obvious fallback that never fires.",
+    "api_ergonomics": "Narrow public surface with all required derives, doc comments on public items, Display implemented, and a Default impl provided as a bonus.",
+    "idiomaticity": "Uses iterator chains for the sum, idiomatic HashMap entry API, derives where applicable, and avoids unnecessary clones with consistent borrowing."
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "task": "roman",
+  "treatment": "direct",
+  "run": 2,
+  "compile_ok": true,
+  "tests_passed": 20,
+  "tests_total": 20,
+  "clippy_warnings": 4,
+  "loc": 223,
+  "unwrap_count": 19,
+  "panic_count": 0,
+  "todo_count": 0,
+  "unsafe_count": 0,
+  "response_chars": 7764,
+  "code_chars": 7752,
+  "duration_s": 51.32347655296326
+}

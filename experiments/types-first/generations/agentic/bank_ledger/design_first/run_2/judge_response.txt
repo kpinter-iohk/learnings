@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Newtypes wrap u64 IDs and AccountType is a proper enum, but the unused `name` field and untagged transaction structure show some missed modeling opportunities."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with distinguishing variants carrying useful context (offending AccountId, observed sum), no panics or unwraps in the library code."},
+  "api_ergonomics": {"score": 2, "justification": "Clean public surface with all required derives and a sensible Display impl, but no doc comments on any public item and no Default impl for Ledger."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with derives and pattern matching, but uses saturating_add for an overflow case that should arguably error, and balance uses nested loops rather than iterator chaining like flat_map/filter/sum."}
+}

@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "job_queue",
+  "treatment": "design_first",
+  "run": 2,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 2,
+  "idiomaticity": 2,
+  "total": 8,
+  "justifications": {
+    "type_expressiveness": "Newtype JobId, enum JobState, and typed QueueError are used; minor weakness is the optional retry_at field rather than encoding state-specific data inside the JobState/Job representation.",
+    "error_handling": "Typed error enum with two distinguishing variants and Display impl; uses an undocumented expect(\"present\") and an assert! in the constructor instead of returning a Result.",
+    "api_ergonomics": "Public items are documented with sensible derives and a narrow surface, but JobState lacks Clone/Copy and QueueError doesn't implement std::error::Error, which is conventional.",
+    "idiomaticity": "Generally idiomatic with ?, ok_or, and derives, but the get_state match-rewriting JobState variant-by-variant (instead of deriving Clone/Copy) and the dead-code retry_at.map(|_| ...) chain in fail are non-idiomatic."
+  }
+}

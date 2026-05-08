@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "The domain is minimal (two strings in, usize out) and the chosen primitives are appropriate; there is little room or need for richer types here."},
+  "error_handling": {"score": 3, "justification": "The function is total and infallible by design, contains no panics, unwraps, or expects, so error handling is correctly absent."},
+  "api_ergonomics": {"score": 1, "justification": "The signature matches the spec and naming is fine, but there are no doc comments on the public function and no module-level documentation."},
+  "idiomaticity": {"score": 2, "justification": "Uses iterator collection, range iteration, min chaining, and mem::swap for row reuse, though the inner DP loop is necessarily index-based and lacks any documentation comments."}
+}

@@ -1,0 +1,9 @@
+Implement the following in Rust as the contents of a single `lib.rs`. Use only the standard library.
+
+---
+
+<<TASK_SPEC>>
+
+---
+
+Output the complete `lib.rs` file.

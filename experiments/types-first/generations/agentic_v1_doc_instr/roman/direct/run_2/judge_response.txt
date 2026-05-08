@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "RomanError is a well-modeled enum with distinguishing variants and InvalidChar carries the offending char, though the (value, &str) tuple table could be a typed const struct."},
+  "error_handling": {"score": 2, "justification": "Typed error enum with meaningful variants and no panics in library code, but no documentation comments and the canonical check relies on a slightly indirect round-trip strategy without explanatory rationale."},
+  "api_ergonomics": {"score": 1, "justification": "Has Debug/Display/Clone/Eq derives on the error and a clean signature, but there are no doc comments on any public item, which is a notable gap for a public API."},
+  "idiomaticity": {"score": 2, "justification": "Uses iterators, ?, derives, and checked arithmetic appropriately, though collecting chars into a Vec and indexing with a manual while loop is less idiomatic than a windowed iterator approach."}
+}

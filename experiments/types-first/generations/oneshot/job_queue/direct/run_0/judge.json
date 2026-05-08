@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "job_queue",
+  "treatment": "direct",
+  "run": 0,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Uses an enum for JobState, a newtype JobId, and typed QueueError variants; internal Job struct is reasonable, though things like enqueued_seq remain raw u64 and retry_at as Option<Instant> mixes states slightly.",
+    "error_handling": "Typed QueueError enum distinguishes UnknownJob vs NotRunning with Display impl, but Queue::new still uses assert! for the max_attempts precondition and an undocumented expect in checkout.",
+    "api_ergonomics": "Sensible derives on JobState/JobId/QueueError and a Display impl, but there are no doc comments on any public item and CheckedOut lacks common derives like Debug.",
+    "idiomaticity": "Generally idiomatic Rust with ?, map_or, matches!, and proper derives, though the checkout loop is hand-rolled rather than using iterator min_by_key and the payload is cloned on checkout."
+  }
+}

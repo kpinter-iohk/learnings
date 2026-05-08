@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "roman",
+  "treatment": "direct",
+  "run": 2,
+  "type_expressiveness": 2,
+  "error_handling": 3,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 8,
+  "justifications": {
+    "type_expressiveness": "Uses a proper enum with distinguishing variants including a char-carrying InvalidCharacter, though the lookup table uses raw (u32, &str) tuples rather than a dedicated struct.",
+    "error_handling": "Typed error enum with meaningful variants (OutOfRange, Empty, InvalidCharacter, NotCanonical), no panics in library code, and unwraps appear only in tests.",
+    "api_ergonomics": "Sensible derives and Display are present, but no doc comments on any public items (functions, error type, or variants) and no std::error::Error implementation.",
+    "idiomaticity": "Generally idiomatic with iterator usage and proper match, but uses an index-based for loop over values and could leverage windows/zip and matches! more expressively."
+  }
+}

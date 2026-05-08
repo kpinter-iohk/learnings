@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "roman",
+  "treatment": "direct",
+  "run": 0,
+  "type_expressiveness": 2,
+  "error_handling": 3,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 8,
+  "justifications": {
+    "type_expressiveness": "RomanError is a proper enum with meaningful variants including InvalidCharacter(char), though the lookup table uses raw (u32, &str) tuples rather than a dedicated struct.",
+    "error_handling": "Typed enum with distinct variants for each failure mode, no panics in library code, implements std::error::Error, and uses checked_add defensively.",
+    "api_ergonomics": "Reasonable derives and Display/Error impls, but no doc comments on any public item (RomanError, its variants, to_roman, from_roman).",
+    "idiomaticity": "Uses iterators, ?, strip_prefix, and pattern matching idiomatically, though the canonical-form check via re-encoding then string comparison is a slightly heavy-handed approach."
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "task": "levenshtein",
+  "treatment": "direct",
+  "run": 2,
+  "compile_ok": true,
+  "tests_passed": 16,
+  "tests_total": 16,
+  "clippy_warnings": 2,
+  "loc": 119,
+  "unwrap_count": 0,
+  "panic_count": 0,
+  "todo_count": 0,
+  "unsafe_count": 0,
+  "response_chars": 4790,
+  "code_chars": 4020,
+  "duration_s": 26.02530002593994
+}

@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses an enum for AccountType, newtypes for AccountId and TransactionId, and a typed error enum, though the Account/Transaction internals could carry more domain-specific structure."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with three meaningfully distinct variants, no panics or unwraps in library code, and saturating_add avoids overflow panics."},
+  "api_ergonomics": {"score": 2, "justification": "Clean public surface with appropriate derives and a Display impl, but lacks doc comments on public items and no Default impl for Ledger."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with derives and proper Result usage, though balance uses nested manual loops where flat_map/filter/sum would be more expressive and contains_key followed by separate lookups is slightly redundant."}
+}

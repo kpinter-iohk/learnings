@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 3, "justification": "Uses newtypes for AccountId and TransactionId, a proper enum for AccountType, and a typed error enum with informative variants including the unbalanced sum."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with three meaningfully distinct variants, no panics in library code, and the only unwrap is on a HashMap lookup with an obvious fallback that never fires."},
+  "api_ergonomics": {"score": 3, "justification": "Narrow public surface with all required derives, doc comments on public items, Display implemented, and a Default impl provided as a bonus."},
+  "idiomaticity": {"score": 3, "justification": "Uses iterator chains for the sum, idiomatic HashMap entry API, derives where applicable, and avoids unnecessary clones with consistent borrowing."}
+}

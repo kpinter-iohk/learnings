@@ -1,0 +1,298 @@
+# Step 1: Type Design and Signatures
+
+```rust
+use std::collections::HashMap;
+use std::fmt;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountType {
+    Asset,
+    Liability,
+    Equity,
+    Revenue,
+    Expense,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AccountId(u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TransactionId(u64);
+
+#[derive(Debug)]
+pub enum LedgerError {
+    EmptyEntries,
+    UnknownAccount(AccountId),
+    Unbalanced { sum: i64 },
+}
+
+impl fmt::Display for LedgerError {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        todo!()
+    }
+}
+
+struct Account {
+    name: String,
+    ty: AccountType,
+}
+
+struct Transaction {
+    entries: Vec<(AccountId, i64)>,
+}
+
+pub struct Ledger {
+    accounts: HashMap<AccountId, Account>,
+    transactions: HashMap<TransactionId, Transaction>,
+    next_account_id: u64,
+    next_transaction_id: u64,
+}
+
+impl Ledger {
+    pub fn new() -> Self {
+        todo!()
+    }
+
+    pub fn open_account(&mut self, name: String, ty: AccountType) -> AccountId {
+        todo!()
+    }
+
+    pub fn post(
+        &mut self,
+        entries: Vec<(AccountId, i64)>,
+    ) -> Result<TransactionId, LedgerError> {
+        todo!()
+    }
+
+    pub fn balance(&self, id: AccountId) -> Result<i64, LedgerError> {
+        todo!()
+    }
+
+    pub fn account_type(&self, id: AccountId) -> Option<AccountType> {
+        todo!()
+    }
+}
+```
+
+# Step 2: Complete `lib.rs`
+
+```rust
+use std::collections::HashMap;
+use std::fmt;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountType {
+    Asset,
+    Liability,
+    Equity,
+    Revenue,
+    Expense,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AccountId(u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TransactionId(u64);
+
+#[derive(Debug)]
+pub enum LedgerError {
+    EmptyEntries,
+    UnknownAccount(AccountId),
+    Unbalanced { sum: i64 },
+}
+
+impl fmt::Display for LedgerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LedgerError::EmptyEntries => {
+                write!(f, "transaction has no entries")
+            }
+            LedgerError::UnknownAccount(id) => {
+                write!(f, "unknown account: {:?}", id)
+            }
+            LedgerError::Unbalanced { sum } => {
+                write!(
+                    f,
+                    "transaction entries are unbalanced; sum = {} (must be 0)",
+                    sum
+                )
+            }
+        }
+    }
+}
+
+struct Account {
+    #[allow(dead_code)]
+    name: String,
+    ty: AccountType,
+}
+
+struct Transaction {
+    entries: Vec<(AccountId, i64)>,
+}
+
+pub struct Ledger {
+    accounts: HashMap<AccountId, Account>,
+    transactions: HashMap<TransactionId, Transaction>,
+    next_account_id: u64,
+    next_transaction_id: u64,
+}
+
+impl Ledger {
+    pub fn new() -> Self {
+        Ledger {
+            accounts: HashMap::new(),
+            transactions: HashMap::new(),
+            next_account_id: 0,
+            next_transaction_id: 0,
+        }
+    }
+
+    pub fn open_account(&mut self, name: String, ty: AccountType) -> AccountId {
+        let id = AccountId(self.next_account_id);
+        self.next_account_id += 1;
+        self.accounts.insert(id, Account { name, ty });
+        id
+    }
+
+    pub fn post(
+        &mut self,
+        entries: Vec<(AccountId, i64)>,
+    ) -> Result<TransactionId, LedgerError> {
+        if entries.is_empty() {
+            return Err(LedgerError::EmptyEntries);
+        }
+
+        // Check that all referenced accounts exist.
+        for (acct, _) in &entries {
+            if !self.accounts.contains_key(acct) {
+                return Err(LedgerError::UnknownAccount(*acct));
+            }
+        }
+
+        // Check that the entries sum to zero, using checked arithmetic to be
+        // safe against overflow.
+        let mut sum: i64 = 0;
+        for (_, amount) in &entries {
+            sum = match sum.checked_add(*amount) {
+                Some(s) => s,
+                None => return Err(LedgerError::Unbalanced { sum: i64::MAX }),
+            };
+        }
+        if sum != 0 {
+            return Err(LedgerError::Unbalanced { sum });
+        }
+
+        let id = TransactionId(self.next_transaction_id);
+        self.next_transaction_id += 1;
+        self.transactions.insert(id, Transaction { entries });
+        Ok(id)
+    }
+
+    pub fn balance(&self, id: AccountId) -> Result<i64, LedgerError> {
+        if !self.accounts.contains_key(&id) {
+            return Err(LedgerError::UnknownAccount(id));
+        }
+
+        let mut total: i64 = 0;
+        for tx in self.transactions.values() {
+            for (acct, amount) in &tx.entries {
+                if *acct == id {
+                    total = total.saturating_add(*amount);
+                }
+            }
+        }
+        Ok(total)
+    }
+
+    pub fn account_type(&self, id: AccountId) -> Option<AccountType> {
+        self.accounts.get(&id).map(|a| a.ty)
+    }
+}
+
+impl Default for Ledger {
+    fn default() -> Self {
+        Ledger::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opens_accounts_and_assigns_unique_ids() {
+        let mut l = Ledger::new();
+        let a = l.open_account("Cash".to_string(), AccountType::Asset);
+        let b = l.open_account("Equity".to_string(), AccountType::Equity);
+        assert_ne!(a, b);
+        assert_eq!(l.account_type(a), Some(AccountType::Asset));
+        assert_eq!(l.account_type(b), Some(AccountType::Equity));
+    }
+
+    #[test]
+    fn account_type_unknown_returns_none() {
+        let l = Ledger::new();
+        assert_eq!(l.account_type(AccountId(999)), None);
+    }
+
+    #[test]
+    fn post_empty_entries_errors() {
+        let mut l = Ledger::new();
+        let err = l.post(vec![]).unwrap_err();
+        assert!(matches!(err, LedgerError::EmptyEntries));
+    }
+
+    #[test]
+    fn post_unknown_account_errors() {
+        let mut l = Ledger::new();
+        let a = l.open_account("Cash".to_string(), AccountType::Asset);
+        let bogus = AccountId(42);
+        let err = l.post(vec![(a, 100), (bogus, -100)]).unwrap_err();
+        assert!(matches!(err, LedgerError::UnknownAccount(_)));
+    }
+
+    #[test]
+    fn post_unbalanced_errors() {
+        let mut l = Ledger::new();
+        let a = l.open_account("Cash".to_string(), AccountType::Asset);
+        let b = l.open_account("Equity".to_string(), AccountType::Equity);
+        let err = l.post(vec![(a, 100), (b, -50)]).unwrap_err();
+        assert!(matches!(err, LedgerError::Unbalanced { sum: 50 }));
+    }
+
+    #[test]
+    fn post_balanced_succeeds_and_balance_accumulates() {
+        let mut l = Ledger::new();
+        let cash = l.open_account("Cash".to_string(), AccountType::Asset);
+        let eq = l.open_account("Equity".to_string(), AccountType::Equity);
+        let exp = l.open_account("Rent".to_string(), AccountType::Expense);
+
+        let t1 = l.post(vec![(cash, 1000), (eq, -1000)]).unwrap();
+        let t2 = l.post(vec![(cash, -200), (exp, 200)]).unwrap();
+        assert_ne!(t1, t2);
+
+        assert_eq!(l.balance(cash).unwrap(), 800);
+        assert_eq!(l.balance(eq).unwrap(), -1000);
+        assert_eq!(l.balance(exp).unwrap(), 200);
+    }
+
+    #[test]
+    fn balance_unknown_account_errors() {
+        let l = Ledger::new();
+        let err = l.balance(AccountId(7)).unwrap_err();
+        assert!(matches!(err, LedgerError::UnknownAccount(_)));
+    }
+
+    #[test]
+    fn display_messages_present() {
+        let e1 = LedgerError::EmptyEntries;
+        let e2 = LedgerError::UnknownAccount(AccountId(1));
+        let e3 = LedgerError::Unbalanced { sum: 5 };
+        assert!(!format!("{}", e1).is_empty());
+        assert!(!format!("{}", e2).is_empty());
+        assert!(!format!("{}", e3).is_empty());
+    }
+}
+```

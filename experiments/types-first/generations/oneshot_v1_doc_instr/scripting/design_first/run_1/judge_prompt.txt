@@ -1,0 +1,986 @@
+You are an expert Rust reviewer scoring a single library implementation against a spec.
+
+The code implements this spec:
+
+---
+Implement a tiny expression-language evaluator in Rust.
+
+Grammar:
+
+```
+expr  := let | if | or
+let   := "let" IDENT "=" expr "in" expr
+if    := "if" expr "then" expr "else" expr
+or    := and ("or" and)*
+and   := not ("and" not)*
+not   := "not" not | cmp
+cmp   := add (("==" | "!=" | "<" | "<=" | ">" | ">=") add)?
+add   := mul (("+" | "-") mul)*
+mul   := unary (("*" | "/") unary)*
+unary := "-" unary | atom
+atom  := INT | "true" | "false" | IDENT | "(" expr ")"
+```
+
+Identifiers match `[a-z_][a-z0-9_]*` and are not any of the keywords (`let`, `in`, `if`, `then`, `else`, `or`, `and`, `not`, `true`, `false`). Whitespace separates tokens. No comments.
+
+Values are `i64` or `bool`. There are no implicit conversions: `1 + true` is a runtime error; `if 1 then a else b` is a runtime error.
+
+Public API:
+
+- `pub fn parse(input: &str) -> Result<Expr, ParseError>`
+- `pub fn eval(expr: &Expr) -> Result<Value, EvalError>`
+
+The types `Expr`, `Value`, `ParseError`, and `EvalError` must be public.
+
+Additional requirements on those types:
+
+- `Value` must implement `std::fmt::Display` such that integer values print as decimal (e.g., `42`, `-3`) and booleans print as `true` or `false`.
+- `ParseError` and `EvalError` must implement `std::fmt::Display` and `std::fmt::Debug`.
+- `ParseError` must carry the byte offset within the input where parsing failed.
+- `EvalError` must distinguish at least three cases: type errors, division by zero, and unbound identifiers. The exact representation is your choice.
+
+Standard library only. The complete program is one `lib.rs`.
+---
+
+The code:
+
+```rust
+//!
+//! Values are `i64` or `bool`; there are no implicit conversions.
+
+use std::fmt;
+
+// ---------- Public types ----------
+
+/// A runtime value: either a 64-bit signed integer or a boolean.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Value {
+    /// A signed 64-bit integer.
+    Int(i64),
+    /// A boolean.
+    Bool(bool),
+}
+
+/// A binary operator that appears in [`Expr::Binary`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    Or,
+    And,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+/// A unary operator that appears in [`Expr::Unary`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    /// Arithmetic negation, written `-x`.
+    Neg,
+    /// Boolean negation, written `not x`.
+    Not,
+}
+
+/// The abstract syntax tree of a parsed expression.
+#[derive(Debug, Clone)]
+pub enum Expr {
+    /// Integer literal.
+    Int(i64),
+    /// Boolean literal (`true` / `false`).
+    Bool(bool),
+    /// A reference to a bound identifier.
+    Var(String),
+    /// `let NAME = VALUE in BODY`.
+    Let {
+        name: String,
+        value: Box<Expr>,
+        body: Box<Expr>,
+    },
+    /// `if COND then THEN else ELSE`.
+    If {
+        cond: Box<Expr>,
+        then_branch: Box<Expr>,
+        else_branch: Box<Expr>,
+    },
+    /// A binary application `LHS OP RHS`.
+    Binary {
+        op: BinOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    /// A unary application `OP OPERAND`.
+    Unary {
+        op: UnaryOp,
+        operand: Box<Expr>,
+    },
+}
+
+/// An error produced by [`parse`].
+///
+/// Carries the byte offset within the input at which parsing failed
+/// along with a human-readable description.
+#[derive(Clone)]
+pub struct ParseError {
+    /// Byte offset within the original input where the error occurred.
+    pub offset: usize,
+    /// Human-readable explanation.
+    pub message: String,
+}
+
+/// An error produced by [`eval`].
+#[derive(Clone)]
+pub enum EvalError {
+    /// A value of the wrong type was supplied to an operator or
+    /// control-flow construct.
+    TypeError(String),
+    /// Integer division by zero.
+    DivisionByZero,
+    /// A variable was referenced that is not in scope.
+    UnboundIdentifier(String),
+}
+
+// ---------- Display / Debug impls ----------
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Int(n) => write!(f, "{}", n),
+            Value::Bool(b) => write!(f, "{}", b),
+        }
+    }
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "parse error at byte {}: {}", self.offset, self.message)
+    }
+}
+
+impl fmt::Debug for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ParseError")
+            .field("offset", &self.offset)
+            .field("message", &self.message)
+            .finish()
+    }
+}
+
+impl fmt::Display for EvalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EvalError::TypeError(msg) => write!(f, "type error: {}", msg),
+            EvalError::DivisionByZero => write!(f, "division by zero"),
+            EvalError::UnboundIdentifier(name) => {
+                write!(f, "unbound identifier: {}", name)
+            }
+        }
+    }
+}
+
+impl fmt::Debug for EvalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EvalError::TypeError(msg) => {
+                f.debug_tuple("TypeError").field(msg).finish()
+            }
+            EvalError::DivisionByZero => write!(f, "DivisionByZero"),
+            EvalError::UnboundIdentifier(name) => {
+                f.debug_tuple("UnboundIdentifier").field(name).finish()
+            }
+        }
+    }
+}
+
+// ---------- Lexer ----------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Token {
+    Int(i64),
+    Ident(String),
+    Let,
+    In,
+    If,
+    Then,
+    Else,
+    Or,
+    And,
+    Not,
+    True,
+    False,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    EqEq,   // ==
+    BangEq, // !=
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Assign, // =
+    LParen,
+    RParen,
+}
+
+#[derive(Debug, Clone)]
+struct TokenInfo {
+    token: Token,
+    offset: usize,
+}
+
+impl ParseError {
+    fn new(offset: usize, message: impl Into<String>) -> Self {
+        ParseError {
+            offset,
+            message: message.into(),
+        }
+    }
+}
+
+fn is_ident_start(c: u8) -> bool {
+    c == b'_' || (b'a'..=b'z').contains(&c)
+}
+
+fn is_ident_continue(c: u8) -> bool {
+    is_ident_start(c) || (b'0'..=b'9').contains(&c)
+}
+
+fn tokenize(input: &str) -> Result<Vec<TokenInfo>, ParseError> {
+    let bytes = input.as_bytes();
+    let mut pos = 0;
+    let mut tokens = Vec::new();
+
+    while pos < bytes.len() {
+        let c = bytes[pos];
+
+        // Whitespace
+        if c.is_ascii_whitespace() {
+            pos += 1;
+            continue;
+        }
+
+        let start = pos;
+
+        // Integer
+        if c.is_ascii_digit() {
+            let mut end = pos;
+            while end < bytes.len() && bytes[end].is_ascii_digit() {
+                end += 1;
+            }
+            let s = &input[start..end];
+            let n: i64 = s
+                .parse()
+                .map_err(|_| ParseError::new(start, "integer literal out of range"))?;
+            tokens.push(TokenInfo {
+                token: Token::Int(n),
+                offset: start,
+            });
+            pos = end;
+            continue;
+        }
+
+        // Identifier / keyword
+        if is_ident_start(c) {
+            let mut end = pos;
+            while end < bytes.len() && is_ident_continue(bytes[end]) {
+                end += 1;
+            }
+            let s = &input[start..end];
+            let token = match s {
+                "let" => Token::Let,
+                "in" => Token::In,
+                "if" => Token::If,
+                "then" => Token::Then,
+                "else" => Token::Else,
+                "or" => Token::Or,
+                "and" => Token::And,
+                "not" => Token::Not,
+                "true" => Token::True,
+                "false" => Token::False,
+                _ => Token::Ident(s.to_string()),
+            };
+            tokens.push(TokenInfo {
+                token,
+                offset: start,
+            });
+            pos = end;
+            continue;
+        }
+
+        // Operators / punctuation
+        let (token, len) = match c {
+            b'+' => (Token::Plus, 1),
+            b'-' => (Token::Minus, 1),
+            b'*' => (Token::Star, 1),
+            b'/' => (Token::Slash, 1),
+            b'(' => (Token::LParen, 1),
+            b')' => (Token::RParen, 1),
+            b'=' => {
+                if pos + 1 < bytes.len() && bytes[pos + 1] == b'=' {
+                    (Token::EqEq, 2)
+                } else {
+                    (Token::Assign, 1)
+                }
+            }
+            b'!' => {
+                if pos + 1 < bytes.len() && bytes[pos + 1] == b'=' {
+                    (Token::BangEq, 2)
+                } else {
+                    return Err(ParseError::new(pos, "unexpected character '!'"));
+                }
+            }
+            b'<' => {
+                if pos + 1 < bytes.len() && bytes[pos + 1] == b'=' {
+                    (Token::Le, 2)
+                } else {
+                    (Token::Lt, 1)
+                }
+            }
+            b'>' => {
+                if pos + 1 < bytes.len() && bytes[pos + 1] == b'=' {
+                    (Token::Ge, 2)
+                } else {
+                    (Token::Gt, 1)
+                }
+            }
+            _ => {
+                return Err(ParseError::new(
+                    pos,
+                    format!("unexpected character {:?}", c as char),
+                ))
+            }
+        };
+        tokens.push(TokenInfo {
+            token,
+            offset: pos,
+        });
+        pos += len;
+    }
+
+    Ok(tokens)
+}
+
+// ---------- Parser ----------
+
+struct Parser<'a> {
+    tokens: &'a [TokenInfo],
+    pos: usize,
+    eof_offset: usize,
+}
+
+impl<'a> Parser<'a> {
+    fn new(tokens: &'a [TokenInfo], eof_offset: usize) -> Self {
+        Parser {
+            tokens,
+            pos: 0,
+            eof_offset,
+        }
+    }
+
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.pos).map(|t| &t.token)
+    }
+
+    fn current_offset(&self) -> usize {
+        self.tokens
+            .get(self.pos)
+            .map(|t| t.offset)
+            .unwrap_or(self.eof_offset)
+    }
+
+    fn bump(&mut self) {
+        self.pos += 1;
+    }
+
+    fn expect(&mut self, expected: &Token, what: &str) -> Result<(), ParseError> {
+        match self.peek() {
+            Some(t) if t == expected => {
+                self.bump();
+                Ok(())
+            }
+            _ => Err(ParseError::new(
+                self.current_offset(),
+                format!("expected {}", what),
+            )),
+        }
+    }
+
+    fn expect_ident(&mut self) -> Result<String, ParseError> {
+        let offset = self.current_offset();
+        match self.tokens.get(self.pos) {
+            Some(TokenInfo {
+                token: Token::Ident(s),
+                ..
+            }) => {
+                let s = s.clone();
+                self.bump();
+                Ok(s)
+            }
+            _ => Err(ParseError::new(offset, "expected identifier")),
+        }
+    }
+
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        match self.peek() {
+            Some(Token::Let) => self.parse_let(),
+            Some(Token::If) => self.parse_if(),
+            _ => self.parse_or(),
+        }
+    }
+
+    fn parse_let(&mut self) -> Result<Expr, ParseError> {
+        self.expect(&Token::Let, "'let'")?;
+        let name = self.expect_ident()?;
+        self.expect(&Token::Assign, "'='")?;
+        let value = Box::new(self.parse_expr()?);
+        self.expect(&Token::In, "'in'")?;
+        let body = Box::new(self.parse_expr()?);
+        Ok(Expr::Let { name, value, body })
+    }
+
+    fn parse_if(&mut self) -> Result<Expr, ParseError> {
+        self.expect(&Token::If, "'if'")?;
+        let cond = Box::new(self.parse_expr()?);
+        self.expect(&Token::Then, "'then'")?;
+        let then_branch = Box::new(self.parse_expr()?);
+        self.expect(&Token::Else, "'else'")?;
+        let else_branch = Box::new(self.parse_expr()?);
+        Ok(Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+        })
+    }
+
+    fn parse_or(&mut self) -> Result<Expr, ParseError> {
+        let mut lhs = self.parse_and()?;
+        while matches!(self.peek(), Some(Token::Or)) {
+            self.bump();
+            let rhs = self.parse_and()?;
+            lhs = Expr::Binary {
+                op: BinOp::Or,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn parse_and(&mut self) -> Result<Expr, ParseError> {
+        let mut lhs = self.parse_not()?;
+        while matches!(self.peek(), Some(Token::And)) {
+            self.bump();
+            let rhs = self.parse_not()?;
+            lhs = Expr::Binary {
+                op: BinOp::And,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn parse_not(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek(), Some(Token::Not)) {
+            self.bump();
+            let operand = Box::new(self.parse_not()?);
+            Ok(Expr::Unary {
+                op: UnaryOp::Not,
+                operand,
+            })
+        } else {
+            self.parse_cmp()
+        }
+    }
+
+    fn parse_cmp(&mut self) -> Result<Expr, ParseError> {
+        let lhs = self.parse_add()?;
+        let op = match self.peek() {
+            Some(Token::EqEq) => BinOp::Eq,
+            Some(Token::BangEq) => BinOp::Ne,
+            Some(Token::Lt) => BinOp::Lt,
+            Some(Token::Le) => BinOp::Le,
+            Some(Token::Gt) => BinOp::Gt,
+            Some(Token::Ge) => BinOp::Ge,
+            _ => return Ok(lhs),
+        };
+        self.bump();
+        let rhs = self.parse_add()?;
+        Ok(Expr::Binary {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        })
+    }
+
+    fn parse_add(&mut self) -> Result<Expr, ParseError> {
+        let mut lhs = self.parse_mul()?;
+        loop {
+            let op = match self.peek() {
+                Some(Token::Plus) => BinOp::Add,
+                Some(Token::Minus) => BinOp::Sub,
+                _ => break,
+            };
+            self.bump();
+            let rhs = self.parse_mul()?;
+            lhs = Expr::Binary {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn parse_mul(&mut self) -> Result<Expr, ParseError> {
+        let mut lhs = self.parse_unary()?;
+        loop {
+            let op = match self.peek() {
+                Some(Token::Star) => BinOp::Mul,
+                Some(Token::Slash) => BinOp::Div,
+                _ => break,
+            };
+            self.bump();
+            let rhs = self.parse_unary()?;
+            lhs = Expr::Binary {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            };
+        }
+        Ok(lhs)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek(), Some(Token::Minus)) {
+            self.bump();
+            let operand = Box::new(self.parse_unary()?);
+            Ok(Expr::Unary {
+                op: UnaryOp::Neg,
+                operand,
+            })
+        } else {
+            self.parse_atom()
+        }
+    }
+
+    fn parse_atom(&mut self) -> Result<Expr, ParseError> {
+        let offset = self.current_offset();
+        let tok = match self.tokens.get(self.pos) {
+            Some(t) => t,
+            None => return Err(ParseError::new(offset, "expected expression, found end of input")),
+        };
+        match &tok.token {
+            Token::Int(n) => {
+                let n = *n;
+                self.bump();
+                Ok(Expr::Int(n))
+            }
+            Token::True => {
+                self.bump();
+                Ok(Expr::Bool(true))
+            }
+            Token::False => {
+                self.bump();
+                Ok(Expr::Bool(false))
+            }
+            Token::Ident(name) => {
+                let name = name.clone();
+                self.bump();
+                Ok(Expr::Var(name))
+            }
+            Token::LParen => {
+                self.bump();
+                let e = self.parse_expr()?;
+                self.expect(&Token::RParen, "')'")?;
+                Ok(e)
+            }
+            _ => Err(ParseError::new(offset, "expected expression")),
+        }
+    }
+}
+
+/// Parse an expression from source text.
+pub fn parse(input: &str) -> Result<Expr, ParseError> {
+    let tokens = tokenize(input)?;
+    let mut parser = Parser::new(&tokens, input.len());
+    let expr = parser.parse_expr()?;
+    if parser.pos < tokens.len() {
+        return Err(ParseError::new(
+            tokens[parser.pos].offset,
+            "unexpected trailing input",
+        ));
+    }
+    Ok(expr)
+}
+
+// ---------- Evaluator ----------
+
+fn type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Int(_) => "int",
+        Value::Bool(_) => "bool",
+    }
+}
+
+fn eval_in(expr: &Expr, env: &mut Vec<(String, Value)>) -> Result<Value, EvalError> {
+    match expr {
+        Expr::Int(n) => Ok(Value::Int(*n)),
+        Expr::Bool(b) => Ok(Value::Bool(*b)),
+        Expr::Var(name) => {
+            for (n, v) in env.iter().rev() {
+                if n == name {
+                    return Ok(v.clone());
+                }
+            }
+            Err(EvalError::UnboundIdentifier(name.clone()))
+        }
+        Expr::Let { name, value, body } => {
+            let v = eval_in(value, env)?;
+            env.push((name.clone(), v));
+            let result = eval_in(body, env);
+            env.pop();
+            result
+        }
+        Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => match eval_in(cond, env)? {
+            Value::Bool(true) => eval_in(then_branch, env),
+            Value::Bool(false) => eval_in(else_branch, env),
+            other => Err(EvalError::TypeError(format!(
+                "'if' condition must be bool, got {}",
+                type_name(&other)
+            ))),
+        },
+        Expr::Binary { op, lhs, rhs } => eval_binary(*op, lhs, rhs, env),
+        Expr::Unary { op, operand } => eval_unary(*op, operand, env),
+    }
+}
+
+fn eval_binary(
+    op: BinOp,
+    lhs: &Expr,
+    rhs: &Expr,
+    env: &mut Vec<(String, Value)>,
+) -> Result<Value, EvalError> {
+    match op {
+        // Short-circuit logical operators.
+        BinOp::Or => {
+            let l = eval_in(lhs, env)?;
+            match l {
+                Value::Bool(true) => Ok(Value::Bool(true)),
+                Value::Bool(false) => match eval_in(rhs, env)? {
+                    Value::Bool(b) => Ok(Value::Bool(b)),
+                    other => Err(EvalError::TypeError(format!(
+                        "'or' expects bool on the right, got {}",
+                        type_name(&other)
+                    ))),
+                },
+                other => Err(EvalError::TypeError(format!(
+                    "'or' expects bool on the left, got {}",
+                    type_name(&other)
+                ))),
+            }
+        }
+        BinOp::And => {
+            let l = eval_in(lhs, env)?;
+            match l {
+                Value::Bool(false) => Ok(Value::Bool(false)),
+                Value::Bool(true) => match eval_in(rhs, env)? {
+                    Value::Bool(b) => Ok(Value::Bool(b)),
+                    other => Err(EvalError::TypeError(format!(
+                        "'and' expects bool on the right, got {}",
+                        type_name(&other)
+                    ))),
+                },
+                other => Err(EvalError::TypeError(format!(
+                    "'and' expects bool on the left, got {}",
+                    type_name(&other)
+                ))),
+            }
+        }
+
+        // Arithmetic: int x int -> int.
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+            let l = eval_in(lhs, env)?;
+            let r = eval_in(rhs, env)?;
+            match (&l, &r) {
+                (Value::Int(a), Value::Int(b)) => {
+                    let a = *a;
+                    let b = *b;
+                    let v = match op {
+                        BinOp::Add => a.wrapping_add(b),
+                        BinOp::Sub => a.wrapping_sub(b),
+                        BinOp::Mul => a.wrapping_mul(b),
+                        BinOp::Div => {
+                            if b == 0 {
+                                return Err(EvalError::DivisionByZero);
+                            }
+                            a.wrapping_div(b)
+                        }
+                        _ => unreachable!(),
+                    };
+                    Ok(Value::Int(v))
+                }
+                _ => Err(EvalError::TypeError(format!(
+                    "arithmetic '{}' expects int operands, got {} and {}",
+                    binop_symbol(op),
+                    type_name(&l),
+                    type_name(&r)
+                ))),
+            }
+        }
+
+        // Ordering: int x int -> bool.
+        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+            let l = eval_in(lhs, env)?;
+            let r = eval_in(rhs, env)?;
+            match (&l, &r) {
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Bool(match op {
+                    BinOp::Lt => a < b,
+                    BinOp::Le => a <= b,
+                    BinOp::Gt => a > b,
+                    BinOp::Ge => a >= b,
+                    _ => unreachable!(),
+                })),
+                _ => Err(EvalError::TypeError(format!(
+                    "comparison '{}' expects int operands, got {} and {}",
+                    binop_symbol(op),
+                    type_name(&l),
+                    type_name(&r)
+                ))),
+            }
+        }
+
+        // Equality / inequality: same type required.
+        BinOp::Eq | BinOp::Ne => {
+            let l = eval_in(lhs, env)?;
+            let r = eval_in(rhs, env)?;
+            let eq = match (&l, &r) {
+                (Value::Int(a), Value::Int(b)) => a == b,
+                (Value::Bool(a), Value::Bool(b)) => a == b,
+                _ => {
+                    return Err(EvalError::TypeError(format!(
+                        "'{}' requires operands of the same type, got {} and {}",
+                        binop_symbol(op),
+                        type_name(&l),
+                        type_name(&r)
+                    )))
+                }
+            };
+            Ok(Value::Bool(if matches!(op, BinOp::Eq) { eq } else { !eq }))
+        }
+    }
+}
+
+fn eval_unary(
+    op: UnaryOp,
+    operand: &Expr,
+    env: &mut Vec<(String, Value)>,
+) -> Result<Value, EvalError> {
+    let v = eval_in(operand, env)?;
+    match op {
+        UnaryOp::Neg => match v {
+            Value::Int(n) => Ok(Value::Int(n.wrapping_neg())),
+            other => Err(EvalError::TypeError(format!(
+                "unary '-' expects int, got {}",
+                type_name(&other)
+            ))),
+        },
+        UnaryOp::Not => match v {
+            Value::Bool(b) => Ok(Value::Bool(!b)),
+            other => Err(EvalError::TypeError(format!(
+                "'not' expects bool, got {}",
+                type_name(&other)
+            ))),
+        },
+    }
+}
+
+fn binop_symbol(op: BinOp) -> &'static str {
+    match op {
+        BinOp::Or => "or",
+        BinOp::And => "and",
+        BinOp::Eq => "==",
+        BinOp::Ne => "!=",
+        BinOp::Lt => "<",
+        BinOp::Le => "<=",
+        BinOp::Gt => ">",
+        BinOp::Ge => ">=",
+        BinOp::Add => "+",
+        BinOp::Sub => "-",
+        BinOp::Mul => "*",
+        BinOp::Div => "/",
+    }
+}
+
+/// Evaluate a parsed expression.
+pub fn eval(expr: &Expr) -> Result<Value, EvalError> {
+    let mut env: Vec<(String, Value)> = Vec::new();
+    eval_in(expr, &mut env)
+}
+
+// ---------- Tests ----------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(src: &str) -> Result<Value, String> {
+        let e = parse(src).map_err(|e| e.to_string())?;
+        eval(&e).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn arithmetic_precedence() {
+        assert_eq!(run("1 + 2 * 3").unwrap(), Value::Int(7));
+        assert_eq!(run("(1 + 2) * 3").unwrap(), Value::Int(9));
+        assert_eq!(run("-3 + 5").unwrap(), Value::Int(2));
+        assert_eq!(run("10 / 3").unwrap(), Value::Int(3));
+    }
+
+    #[test]
+    fn booleans_and_short_circuit() {
+        assert_eq!(run("true and false").unwrap(), Value::Bool(false));
+        assert_eq!(run("true or false").unwrap(), Value::Bool(true));
+        assert_eq!(run("not (1 == 2)").unwrap(), Value::Bool(true));
+        // Short-circuit hides the type error on the right.
+        assert_eq!(run("true or (1 + true == 0)").unwrap(), Value::Bool(true));
+        assert_eq!(run("false and (1 + true == 0)").unwrap(), Value::Bool(false));
+    }
+
+    #[test]
+    fn let_and_if() {
+        assert_eq!(
+            run("let x = 10 in let y = x * 2 in x + y").unwrap(),
+            Value::Int(30)
+        );
+        assert_eq!(
+            run("if 1 < 2 then 10 else 20").unwrap(),
+            Value::Int(10)
+        );
+        assert_eq!(
+            run("let x = 5 in if x == 5 then true else false").unwrap(),
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn type_errors() {
+        assert!(run("1 + true").unwrap_err().contains("type error"));
+        assert!(run("if 1 then 2 else 3").unwrap_err().contains("type error"));
+        assert!(run("true == 1").unwrap_err().contains("type error"));
+        assert!(run("not 1").unwrap_err().contains("type error"));
+        assert!(run("-true").unwrap_err().contains("type error"));
+    }
+
+    #[test]
+    fn division_by_zero() {
+        assert!(run("1 / 0").unwrap_err().contains("division by zero"));
+        assert!(run("let z = 0 in 7 / z").unwrap_err().contains("division by zero"));
+    }
+
+    #[test]
+    fn unbound_identifier() {
+        assert!(run("x + 1").unwrap_err().contains("unbound identifier"));
+    }
+
+    #[test]
+    fn parse_error_offsets() {
+        let err = parse("1 + ").unwrap_err();
+        assert_eq!(err.offset, 4);
+        let err = parse("1 + @").unwrap_err();
+        assert_eq!(err.offset, 4);
+        let err = parse("(1 + 2").unwrap_err();
+        assert!(err.message.contains("')'"));
+    }
+
+    #[test]
+    fn value_display() {
+        assert_eq!(format!("{}", Value::Int(42)), "42");
+        assert_eq!(format!("{}", Value::Int(-3)), "-3");
+        assert_eq!(format!("{}", Value::Bool(true)), "true");
+        assert_eq!(format!("{}", Value::Bool(false)), "false");
+    }
+
+    #[test]
+    fn shadowing() {
+        assert_eq!(
+            run("let x = 1 in let x = x + 1 in x").unwrap(),
+            Value::Int(2)
+        );
+    }
+
+    #[test]
+    fn not_associativity_with_and() {
+        // `not a and b`  ==  `(not a) and b`
+        assert_eq!(run("not false and true").unwrap(), Value::Bool(true));
+    }
+}
+
+```
+
+SCORING RUBRIC
+
+Score the code on four dimensions, each integer from 0 to 3. Be calibrated
+and strict — most production code is not 3/3. Score the code as written,
+not what you imagine it could become.
+
+== type_expressiveness ==
+How well does the code encode the domain in Rust's type system?
+- 0: Heavy stringly-typed or raw-primitive use where a domain type fits
+     (String error messages instead of typed variants, raw u64 for IDs,
+     booleans for multi-state things).
+- 1: Some types but inconsistent — typed where convenient, untyped where lazy.
+- 2: Mostly typed: enums for discrete states, newtypes for IDs; some
+     opportunities still missed.
+- 3: Thorough domain modeling; every meaningful distinction has a type;
+     no avoidable string-typed or boolean-tagged data.
+
+== error_handling ==
+How disciplined is error handling?
+- 0: Library code uses unwrap(), panic!, or unimplemented! for situations
+     that should produce errors.
+- 1: Returns Result, but error type is String or has uninformative variants.
+- 2: Typed error enum with distinguishing variants; library mostly avoids
+     panicking; occasional unwrap/expect without documented reason.
+- 3: Typed error enum with variants that meaningfully distinguish failure
+     modes; library never panics; any expect/unwrap has a documented reason.
+
+== api_ergonomics ==
+How polished is the public API?
+- 0: Public surface leaks internals; missing common derives; no Display
+     where useful; no doc comments on public items.
+- 1: API works but choices are awkward (e.g., Box<dyn Error>, inconsistent
+     naming, sparse derives).
+- 2: Clean public surface; sensible derives; doc comments on most public items.
+- 3: Polished — narrow public surface, complete derives, every public item
+     documented, naming consistent with std conventions.
+
+== idiomaticity ==
+Does this read like idiomatic Rust?
+- 0: Java-in-Rust. Manual loops where iterators fit; no ? operator; no
+     derives where they apply; aggressive cloning instead of borrowing.
+- 1: Some idioms but inconsistent. Knows Result/Option but doesn't chain well.
+- 2: Generally idiomatic. Uses ?, iterator methods, derives; some
+     non-idiomatic choices remain.
+- 3: Reads like idiomatic Rust written by an experienced practitioner.
+     matches! where appropriate, expressive iterators, consistent error
+     handling, no unnecessary clones.
+
+Output a single JSON object only — no prose, no markdown fences. The JSON must have exactly these keys with integer scores 0..3:
+
+{
+  "type_expressiveness": {"score": <int>, "justification": "<one sentence>"},
+  "error_handling":      {"score": <int>, "justification": "<one sentence>"},
+  "api_ergonomics":      {"score": <int>, "justification": "<one sentence>"},
+  "idiomaticity":        {"score": <int>, "justification": "<one sentence>"}
+}

@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "scripting",
+  "treatment": "design_first",
+  "run": 1,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Good use of enums for Expr, Value, BinOp, UnaryOp, and EvalError variants, but TypeError carries a String message instead of a structured variant and ParseError uses a String message field rather than typed kinds.",
+    "error_handling": "Typed error enums with the three required EvalError variants and no panics in library paths, but TypeError/ParseError messages are stringly-typed and there are some unreachable!() arms (justified but undocumented).",
+    "api_ergonomics": "Public API is clean and Display/Debug are implemented where required, but there are no doc comments on any public item, ParseError.message/offset are public fields, and EvalError lacks PartialEq and a std::error::Error impl.",
+    "idiomaticity": "Generally idiomatic with ?, matches!, and recursive descent, but the env is a Vec scanned linearly with String clones on lookup and manual Debug impls duplicate what derive would produce."
+  }
+}

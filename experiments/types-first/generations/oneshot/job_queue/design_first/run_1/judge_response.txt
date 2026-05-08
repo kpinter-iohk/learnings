@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 3, "justification": "Newtype JobId, exhaustive JobState enum, typed QueueError variants, and a dedicated CheckedOut handle—no stringly-typed or boolean-tagged data where a type fits."},
+  "error_handling": {"score": 2, "justification": "Typed error enum with distinguishing UnknownId/NotRunning variants and Display impl; library uses an undocumented expect in checkout and an assert! panic in new (per spec precondition) rather than returning a Result."},
+  "api_ergonomics": {"score": 3, "justification": "Narrow public surface with doc comments on every public item, sensible derives (Copy/Clone/Eq/Hash/Debug on JobId, PartialEq/Eq/Debug/Clone/Copy on JobState), Display on the error, and std-conventional naming."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with ?, ok_or, map, and matches! in tests, but checkout uses a manual loop instead of iterator chaining and clones the payload on every checkout rather than borrowing."}
+}

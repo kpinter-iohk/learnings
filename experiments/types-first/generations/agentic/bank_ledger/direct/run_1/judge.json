@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "bank_ledger",
+  "treatment": "direct",
+  "run": 1,
+  "type_expressiveness": 2,
+  "error_handling": 3,
+  "api_ergonomics": 2,
+  "idiomaticity": 2,
+  "total": 9,
+  "justifications": {
+    "type_expressiveness": "Newtype IDs wrap u64, AccountType is a proper enum, and LedgerError variants carry typed payloads, though nothing further distinguishes domain concepts like signed amounts or account names.",
+    "error_handling": "Typed error enum with three meaningfully distinct variants carrying contextual data, no panics or unwraps, and proper Display/Debug implementations.",
+    "api_ergonomics": "Clean public surface with appropriate derives, Display on the error, and a Default impl, but no doc comments on any public item.",
+    "idiomaticity": "Uses iterators, sum, map, pattern matching, and Default idiomatically, but redundantly tracks balance per account while also storing entries, and could use entry/get_mut chaining more tightly."
+  }
+}

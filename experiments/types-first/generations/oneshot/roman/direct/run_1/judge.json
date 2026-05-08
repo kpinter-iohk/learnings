@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "roman",
+  "treatment": "direct",
+  "run": 1,
+  "type_expressiveness": 3,
+  "error_handling": 3,
+  "api_ergonomics": 3,
+  "idiomaticity": 3,
+  "total": 12,
+  "justifications": {
+    "type_expressiveness": "RomanError is a well-modeled enum with distinct variants carrying relevant data (the offending char, out-of-range value), and the (value, symbol) table is appropriately typed for the small domain.",
+    "error_handling": "Typed error enum with meaningfully distinct variants, no panics in library code, and the only unwraps are accompanied by an explicit comment justifying their safety after prior validation.",
+    "api_ergonomics": "Narrow public surface with two functions and one error type, sensible derives (Debug, Clone, PartialEq, Eq), informative Display impl, and doc comments on every public item.",
+    "idiomaticity": "Reads like idiomatic Rust: iterator-based encoding loop, ? and checked_add for overflow, matches! in tests, pattern matching on Option, and no unnecessary cloning."
+  }
+}

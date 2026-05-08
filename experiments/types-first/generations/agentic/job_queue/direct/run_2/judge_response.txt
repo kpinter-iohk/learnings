@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses a JobId newtype, JobState enum, and typed QueueError variants, though the internal Job struct uses an Option<Instant> for retry_at where state-encoded data could be more precise."},
+  "error_handling": {"score": 2, "justification": "Typed QueueError enum with meaningful variants, Display impl, and no panics in operational paths; the constructor uses assert! without explicit documentation but it's a precondition check."},
+  "api_ergonomics": {"score": 1, "justification": "Public surface is reasonable with sensible derives, but there are no doc comments on any public items and no Display for JobId."},
+  "idiomaticity": {"score": 2, "justification": "Uses ?, iterator methods, derives, and avoids unnecessary clones in most places, though the checkout loop could use min_by_key and get_state clones JobState rather than returning a Copy variant."}
+}

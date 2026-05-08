@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "roman",
+  "treatment": "design_first",
+  "run": 0,
+  "type_expressiveness": 3,
+  "error_handling": 3,
+  "api_ergonomics": 3,
+  "idiomaticity": 3,
+  "total": 12,
+  "justifications": {
+    "type_expressiveness": "The error enum encodes every meaningful failure mode with carrying data (the offending value/char), and the small domain has no other distinctions left to model.",
+    "error_handling": "Typed enum with informative, distinguishing variants; no unwrap/expect/panic in library code, and checked_add guards against overflow on the parsing path.",
+    "api_ergonomics": "Narrow public surface with module and per-item doc comments including Errors sections, sensible derives (Debug, Clone, PartialEq, Eq), and a manual Display impl following std conventions.",
+    "idiomaticity": "Concise greedy table, idiomatic match on chars, slice-based parsing without unnecessary allocations or clones, and a clean canonicity check via round-trip equality."
+  }
+}

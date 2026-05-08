@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "roman",
+  "treatment": "design_first",
+  "run": 1,
+  "type_expressiveness": 3,
+  "error_handling": 3,
+  "api_ergonomics": 3,
+  "idiomaticity": 2,
+  "total": 11,
+  "justifications": {
+    "type_expressiveness": "RomanError is a well-modeled enum with distinct variants carrying relevant data (the offending value/character), and the (value, symbol) table is appropriately a const slice rather than stringly-typed.",
+    "error_handling": "Typed error enum with meaningfully distinct variants, no panics or unwraps in library code, and overflow is handled via checked_add mapped to NotCanonical.",
+    "api_ergonomics": "Narrow public surface with module-level and per-item doc comments, sensible derives (Debug/Clone/PartialEq/Eq), and a Display impl with informative messages.",
+    "idiomaticity": "Generally idiomatic with iterator-based to_roman and ? usage, but from_roman's byte indexing and explicit while loop with manual two-char lookahead is more imperative than necessary, and the unreachable match arm is a small wart."
+  }
+}

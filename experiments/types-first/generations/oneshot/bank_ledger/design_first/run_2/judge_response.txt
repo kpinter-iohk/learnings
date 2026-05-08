@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses newtype wrappers for AccountId/TransactionId and a proper enum for AccountType and LedgerError variants, though internal Account/Transaction structs are minimal and the Unbalanced sum could saturate silently."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with three meaningfully distinct variants, no panics or unwraps in library code, and Display is implemented informatively."},
+  "api_ergonomics": {"score": 2, "justification": "Clean narrow surface with sensible derives, Display on the error, and a Default impl, but there are no doc comments on any public items."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with iterator usage, derives, and pattern matching, though balance uses nested loops/equality checks rather than filter_map/sum and saturating_add subtly changes overflow semantics."}
+}

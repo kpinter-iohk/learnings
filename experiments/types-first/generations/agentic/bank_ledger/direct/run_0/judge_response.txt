@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Newtypes for AccountId/TransactionId and a typed AccountType enum; LedgerError variants are typed but Unbalanced carries a raw i128 rather than a richer structure."},
+  "error_handling": {"score": 2, "justification": "Typed error enum distinguishes the required failure modes and the library never panics, but uses saturating_add silently instead of detecting overflow as a distinct error."},
+  "api_ergonomics": {"score": 1, "justification": "Sensible derives and a Default impl, but no doc comments on any public item and Display for unknown account uses Debug formatting of the ID."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with iterator-friendly patterns and proper Display impl, though the sum loop could use .iter().map().sum() and balance recomputation is duplicated rather than derived from transactions."}
+}

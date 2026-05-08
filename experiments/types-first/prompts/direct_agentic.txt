@@ -1,0 +1,7 @@
+You are working in the current directory. It contains a `Cargo.toml` for a Rust library crate called `solution` with `lib.rs` at `src/lib.rs`.
+
+Implement the spec below. Use only the standard library. Verify your code compiles with `cargo build --lib` (or `cargo check --lib`) before declaring done. When you're confident the code compiles and is correct, stop.
+
+---
+
+<<TASK_SPEC>>

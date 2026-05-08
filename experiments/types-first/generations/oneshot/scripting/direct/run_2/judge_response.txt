@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Good use of enums for Expr, Value, BinOp, UnaryOp, and EvalError variants, but TypeError carries a String message and ParseError uses a String message rather than typed variants distinguishing kinds of parse/type failures."},
+  "error_handling": {"score": 2, "justification": "Typed EvalError with the three required variants, no panics in library code, but uses .unwrap() on str::from_utf8 without documented reasoning and TypeError stuffs context into a String."},
+  "api_ergonomics": {"score": 2, "justification": "Public items are documented, Display is implemented where required, and derives are sensible, though manual Debug impls for errors are slightly redundant and std::error::Error is not implemented on the error types."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with matches!, ?, and Box-based AST, but uses a Vec<(String, Value)> environment with linear lookup and clones, byte-level lexing instead of char iterators, and an odd Ok(Err(...)?) wrapping in one arm."}
+}

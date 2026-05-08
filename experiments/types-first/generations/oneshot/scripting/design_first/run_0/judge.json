@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "scripting",
+  "treatment": "design_first",
+  "run": 0,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Good enum modeling for Expr/BinOp/UnOp/Value/EvalError, but ParseError and EvalError::TypeError carry free-form String messages and overflow is conflated with type errors instead of having its own variant.",
+    "error_handling": "Typed error enums with the required three EvalError variants and proper offset on ParseError; uses checked arithmetic and Result throughout, though unreachable!() and overflow-as-TypeError are minor blemishes.",
+    "api_ergonomics": "Public types have basic derives and Display, but no doc comments on any public item, and ParseError exposes raw String/usize fields rather than accessor methods.",
+    "idiomaticity": "Uses ?, matches!, and derives consistently, but the lookup loop could be an iterator chain, the let-binding extraction uses an awkward if-let-else-unreachable pattern, and several String clones could be avoided."
+  }
+}

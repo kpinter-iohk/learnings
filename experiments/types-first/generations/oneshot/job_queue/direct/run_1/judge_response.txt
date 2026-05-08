@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Newtype JobId, proper enums for state, and a structured QueueError with informative variants; minor missed opportunities like a single internal Job struct that could split per-state data into a sum type."},
+  "error_handling": {"score": 2, "justification": "Typed error enum distinguishes UnknownJob and NotRunning with context, and the library avoids unwrap in normal paths, but new() panics via assert! and there's an unjustified unwrap_or fallback for instant overflow."},
+  "api_ergonomics": {"score": 1, "justification": "Has Display, Debug, and reasonable derives, but no doc comments on any public items and CheckedOut lacks Debug/common derives."},
+  "idiomaticity": {"score": 2, "justification": "Uses iterators, ?, map_or, and checked arithmetic reasonably, but the manual fold for finding the min by enqueue_order and cloning the payload into CheckedOut are not maximally idiomatic."}
+}

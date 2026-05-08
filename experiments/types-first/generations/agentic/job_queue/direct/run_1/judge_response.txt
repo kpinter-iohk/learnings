@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses newtype JobId, JobState enum, and typed QueueError, though Job's combination of state + Option<Instant> retry_at could be modeled more tightly via per-state data."},
+  "error_handling": {"score": 2, "justification": "Typed error enum with meaningful variants and Display impl; uses an undocumented expect in checkout and panics via assert! in new instead of returning a Result."},
+  "api_ergonomics": {"score": 1, "justification": "Reasonable surface with appropriate derives, but no doc comments on any public item and no std::error::Error impl on QueueError."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic Rust with ?, derives, and HashMap usage, but the checkout loop could use iterator methods/matches! and the payload is cloned rather than borrowed."}
+}

@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "job_queue",
+  "treatment": "direct",
+  "run": 1,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Newtype JobId, proper enums for state, and a structured QueueError with informative variants; minor missed opportunities like a single internal Job struct that could split per-state data into a sum type.",
+    "error_handling": "Typed error enum distinguishes UnknownJob and NotRunning with context, and the library avoids unwrap in normal paths, but new() panics via assert! and there's an unjustified unwrap_or fallback for instant overflow.",
+    "api_ergonomics": "Has Display, Debug, and reasonable derives, but no doc comments on any public items and CheckedOut lacks Debug/common derives.",
+    "idiomaticity": "Uses iterators, ?, map_or, and checked arithmetic reasonably, but the manual fold for finding the min by enqueue_order and cloning the payload into CheckedOut are not maximally idiomatic."
+  }
+}

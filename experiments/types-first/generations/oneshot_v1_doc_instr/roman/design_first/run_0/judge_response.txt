@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 3, "justification": "The error enum encodes every meaningful failure mode with carrying data (the offending value/char), and the small domain has no other distinctions left to model."},
+  "error_handling": {"score": 3, "justification": "Typed enum with informative, distinguishing variants; no unwrap/expect/panic in library code, and checked_add guards against overflow on the parsing path."},
+  "api_ergonomics": {"score": 3, "justification": "Narrow public surface with module and per-item doc comments including Errors sections, sensible derives (Debug, Clone, PartialEq, Eq), and a manual Display impl following std conventions."},
+  "idiomaticity": {"score": 3, "justification": "Concise greedy table, idiomatic match on chars, slice-based parsing without unnecessary allocations or clones, and a clean canonicity check via round-trip equality."}
+}

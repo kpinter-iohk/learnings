@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "job_queue",
+  "treatment": "direct",
+  "run": 0,
+  "type_expressiveness": 3,
+  "error_handling": 2,
+  "api_ergonomics": 3,
+  "idiomaticity": 2,
+  "total": 10,
+  "justifications": {
+    "type_expressiveness": "Newtype JobId, dedicated JobState enum, typed QueueError variants, and a CheckedOut struct cover every meaningful domain distinction without leaking primitives.",
+    "error_handling": "Typed error enum with distinguishing variants and Display impl, but the constructor uses assert! for max_attempts and checkout has an undocumented expect.",
+    "api_ergonomics": "Narrow public surface with appropriate derives, Display on the error, and doc comments on every public item using consistent naming.",
+    "idiomaticity": "Uses ?, derives, and Option/Result well, but the manual best-tracking loop in checkout and the payload clone are slightly less idiomatic than min_by_key or owning the payload."
+  }
+}

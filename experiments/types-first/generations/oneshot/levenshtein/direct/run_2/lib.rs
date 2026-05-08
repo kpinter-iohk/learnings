@@ -1,0 +1,133 @@
+pub fn distance(a: &str, b: &str) -> usize {
+    // Fast paths.
+    if a.is_empty() {
+        return b.chars().count();
+    }
+    if b.is_empty() {
+        return a.chars().count();
+    }
+
+    // Materialize chars so we can index the inner sequence cheaply.
+    // We pick the shorter string for the inner dimension to minimize
+    // the row buffer size (memory) without changing the result.
+    let (a_chars, b_chars): (Vec<char>, Vec<char>) = {
+        let av: Vec<char> = a.chars().collect();
+        let bv: Vec<char> = b.chars().collect();
+        if av.len() < bv.len() {
+            // Swap so that `outer` is the longer one and `inner` is shorter.
+            // Levenshtein distance is symmetric, so this is safe.
+            (bv, av)
+        } else {
+            (av, bv)
+        }
+    };
+
+    let outer = &a_chars; // longer (or equal)
+    let inner = &b_chars; // shorter (or equal)
+    let n = inner.len();
+
+    // `prev[j]` holds the distance between the first `i` chars of `outer`
+    // and the first `j` chars of `inner` for the previous row `i`.
+    // `curr[j]` is the row currently being built.
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr: Vec<usize> = vec![0; n + 1];
+
+    for (i, &oc) in outer.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, &ic) in inner.iter().enumerate() {
+            let cost = if oc == ic { 0 } else { 1 };
+            let deletion = prev[j + 1] + 1;
+            let insertion = curr[j] + 1;
+            let substitution = prev[j] + cost;
+
+            // min of the three.
+            let mut m = deletion;
+            if insertion < m {
+                m = insertion;
+            }
+            if substitution < m {
+                m = substitution;
+            }
+            curr[j + 1] = m;
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[n]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::distance;
+
+    #[test]
+    fn identity() {
+        assert_eq!(distance("", ""), 0);
+        assert_eq!(distance("a", "a"), 0);
+        assert_eq!(distance("hello", "hello"), 0);
+        assert_eq!(distance("café", "café"), 0);
+    }
+
+    #[test]
+    fn empty_baseline() {
+        assert_eq!(distance("", "abc"), 3);
+        assert_eq!(distance("abc", ""), 3);
+        assert_eq!(distance("", "naïve"), "naïve".chars().count());
+        assert_eq!(distance("☃☃☃", ""), 3);
+    }
+
+    #[test]
+    fn symmetry() {
+        let pairs = [
+            ("kitten", "sitting"),
+            ("flaw", "lawn"),
+            ("gumbo", "gambol"),
+            ("a", "abc"),
+            ("rust", "trust"),
+            ("naïve", "naive"),
+            ("é", "e"),
+        ];
+        for (a, b) in pairs {
+            assert_eq!(distance(a, b), distance(b, a), "symmetry failed for ({a:?}, {b:?})");
+        }
+    }
+
+    #[test]
+    fn classic_examples() {
+        assert_eq!(distance("kitten", "sitting"), 3);
+        assert_eq!(distance("flaw", "lawn"), 2);
+        assert_eq!(distance("gumbo", "gambol"), 2);
+        assert_eq!(distance("saturday", "sunday"), 3);
+        assert_eq!(distance("book", "back"), 2);
+    }
+
+    #[test]
+    fn unicode_codepoints() {
+        // "é" is two bytes in UTF-8 but one char.
+        assert_eq!(distance("é", "e"), 1);
+        assert_eq!(distance("naïve", "naive"), 1);
+        // Substitution of a multi-byte char.
+        assert_eq!(distance("café", "cafe"), 1);
+        // Single-char emoji edits.
+        assert_eq!(distance("a😀b", "a😀c"), 1);
+        assert_eq!(distance("😀", ""), 1);
+        assert_eq!(distance("", "😀"), 1);
+    }
+
+    #[test]
+    fn single_edits() {
+        // Insertion.
+        assert_eq!(distance("cat", "cats"), 1);
+        // Deletion.
+        assert_eq!(distance("cats", "cat"), 1);
+        // Substitution.
+        assert_eq!(distance("cat", "bat"), 1);
+    }
+
+    #[test]
+    fn longer_swapped_args() {
+        // Force the internal swap path (shorter on inner dim).
+        assert_eq!(distance("a", "abcdefg"), 6);
+        assert_eq!(distance("abcdefg", "a"), 6);
+    }
+}

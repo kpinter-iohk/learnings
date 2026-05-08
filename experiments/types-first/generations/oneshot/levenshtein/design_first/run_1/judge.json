@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "levenshtein",
+  "treatment": "design_first",
+  "run": 1,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Introduces an `Edit` enum and `DpRows` struct to model the domain, though `cost_of` returning a constant 1 is an over-abstraction that doesn't carry meaningful type information.",
+    "error_handling": "Function is total and cannot fail; no unwrap/panic in library code, but there's no typed error enum since none is required by the API.",
+    "api_ergonomics": "Public `distance` lacks any doc comment despite the spec emphasizing properties and Unicode semantics, though the signature itself is clean and minimal.",
+    "idiomaticity": "Generally idiomatic with reasonable indexed DP loops, but uses a hand-rolled `min3` with `if`/`else` instead of `std::cmp::min` or `.min()` chaining."
+  }
+}

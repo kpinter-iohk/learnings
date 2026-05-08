@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "bank_ledger",
+  "treatment": "direct",
+  "run": 2,
+  "type_expressiveness": 3,
+  "error_handling": 3,
+  "api_ergonomics": 3,
+  "idiomaticity": 3,
+  "total": 12,
+  "justifications": {
+    "type_expressiveness": "Newtypes wrap u64 IDs, AccountType is an enum, LedgerError is a typed enum with structured variants, and internal Account/Entry/Transaction types model the domain cleanly.",
+    "error_handling": "Typed error enum with three meaningful variants, no panics in library paths, and the single expect() has a clear comment justifying that the invariant was just validated.",
+    "api_ergonomics": "Every public item has doc comments, derives are complete (Copy/Clone/Eq/Hash/Debug on IDs, Display on error), naming follows std conventions, and the public surface is narrow.",
+    "idiomaticity": "Uses iterator chains with map/collect, pattern matching, derives, matches! in tests, borrows entries before consuming, and avoids unnecessary clones; the i128 overflow guard is a thoughtful touch."
+  }
+}

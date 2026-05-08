@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Newtype wrappers for AccountId/TransactionId and a typed error enum cover the domain well, though the Account/Transaction internal structs are minimal and the Unbalanced variant uses a raw i64."},
+  "error_handling": {"score": 2, "justification": "Typed error enum with three meaningfully distinguishing variants and no panics, but uses saturating_add silently instead of detecting overflow as a distinct error case."},
+  "api_ergonomics": {"score": 1, "justification": "The required derives are present and the surface is narrow, but there are no doc comments on any public item and no Default impl for Ledger."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with derives, HashMap, and map/Option chaining, though balance uses nested manual loops where iterator chains with flat_map/filter/sum would be more expressive."}
+}

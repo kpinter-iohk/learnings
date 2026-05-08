@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "Uses an enum for state, a newtype for JobId, and a typed error enum, but the internal Job struct still uses an Option<Instant> alongside the state instead of associating retry_at directly with the FailedPendingRetry variant."},
+  "error_handling": {"score": 2, "justification": "Typed QueueError enum with distinguishing variants and Display impl; the constructor panics on invalid max_attempts (documented) and there's an undocumented expect in checkout, with reasonable saturating arithmetic in fail."},
+  "api_ergonomics": {"score": 3, "justification": "Public surface is narrow and well-documented, JobId/JobState have appropriate derives, QueueError implements Debug+Display, and naming is consistent with std conventions."},
+  "idiomaticity": {"score": 2, "justification": "Generally idiomatic with ?, map_or, derives, and matches! in tests, but checkout uses a manual two-pass lookup with a redundant expect and clones the payload rather than leveraging iterator methods like find."}
+}

@@ -1,0 +1,284 @@
+//! In-memory job queue with retry-on-failure.
+//!
+//! A job has a unique `JobId`, a `String` payload (opaque to the queue),
+//! a `JobState`, and an attempt counter. Failed jobs are scheduled for
+//! a retry with exponential backoff up to `max_attempts`, after which
+//! they transition to `Dead`.
+
+use std::collections::HashMap;
+use std::fmt;
+use std::time::{Duration, Instant};
+
+/// A unique, opaque identifier for a job, assigned by the queue at
+/// enqueue time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct JobId(u64);
+
+/// Lifecycle state of a job.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum JobState {
+    Pending,
+    Running,
+    FailedPendingRetry,
+    Succeeded,
+    Dead,
+}
+
+/// Errors returned by `Queue` operations.
+#[derive(Debug)]
+pub enum QueueError {
+    /// The supplied `JobId` does not refer to any job in the queue.
+    UnknownJob,
+    /// The job exists but is not currently in the `Running` state.
+    NotRunning,
+}
+
+impl fmt::Display for QueueError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            QueueError::UnknownJob => write!(f, "unknown job id"),
+            QueueError::NotRunning => write!(f, "job is not in Running state"),
+        }
+    }
+}
+
+/// A handle to a job that has been checked out for execution.
+///
+/// Carries the id and a copy of the payload so a worker can act on the
+/// job without holding a borrow of the queue.
+pub struct CheckedOut {
+    id: JobId,
+    payload: String,
+}
+
+impl CheckedOut {
+    /// The id of the checked-out job.
+    pub fn id(&self) -> JobId {
+        self.id
+    }
+
+    /// The payload string of the checked-out job.
+    pub fn payload(&self) -> &str {
+        &self.payload
+    }
+}
+
+/// Internal per-job record.
+struct Job {
+    payload: String,
+    state: JobState,
+    attempts: u32,
+    retry_at: Option<Instant>,
+}
+
+/// In-memory job queue with retry-on-failure.
+pub struct Queue {
+    max_attempts: u32,
+    base_delay: Duration,
+    next_id: u64,
+    jobs: HashMap<JobId, Job>,
+    /// Insertion order of job ids, used to give checkout a stable FIFO order.
+    order: Vec<JobId>,
+}
+
+impl Queue {
+    /// Create a new queue.
+    ///
+    /// # Panics
+    /// Panics if `max_attempts < 1`.
+    pub fn new(max_attempts: u32, base_delay: Duration) -> Self {
+        assert!(max_attempts >= 1, "max_attempts must be >= 1");
+        Queue {
+            max_attempts,
+            base_delay,
+            next_id: 0,
+            jobs: HashMap::new(),
+            order: Vec::new(),
+        }
+    }
+
+    /// Enqueue a job in `Pending` state and return its assigned id.
+    pub fn enqueue(&mut self, payload: String) -> JobId {
+        let id = JobId(self.next_id);
+        self.next_id += 1;
+        let job = Job {
+            payload,
+            state: JobState::Pending,
+            attempts: 0,
+            retry_at: None,
+        };
+        self.jobs.insert(id, job);
+        self.order.push(id);
+        id
+    }
+
+    /// Check out the next runnable job (a `Pending` job, or a
+    /// `FailedPendingRetry` job whose retry time is `<= now`), in FIFO
+    /// order of original enqueue. Marks the chosen job as `Running`.
+    /// Returns `None` if no job is runnable.
+    pub fn checkout(&mut self, now: Instant) -> Option<CheckedOut> {
+        // Find first runnable id in insertion order.
+        let mut chosen: Option<JobId> = None;
+        for id in &self.order {
+            if let Some(job) = self.jobs.get(id) {
+                let runnable = match job.state {
+                    JobState::Pending => true,
+                    JobState::FailedPendingRetry => match job.retry_at {
+                        Some(t) => t <= now,
+                        None => true,
+                    },
+                    _ => false,
+                };
+                if runnable {
+                    chosen = Some(*id);
+                    break;
+                }
+            }
+        }
+
+        let id = chosen?;
+        let job = self.jobs.get_mut(&id).expect("just located this id");
+        job.state = JobState::Running;
+        job.retry_at = None;
+        Some(CheckedOut {
+            id,
+            payload: job.payload.clone(),
+        })
+    }
+
+    /// Mark a `Running` job as `Succeeded`.
+    pub fn succeed(&mut self, id: JobId) -> Result<(), QueueError> {
+        let job = self.jobs.get_mut(&id).ok_or(QueueError::UnknownJob)?;
+        if job.state != JobState::Running {
+            return Err(QueueError::NotRunning);
+        }
+        job.state = JobState::Succeeded;
+        job.retry_at = None;
+        Ok(())
+    }
+
+    /// Record a failure for a `Running` job.
+    ///
+    /// Increments the attempt counter. If the new attempt count is
+    /// `< max_attempts`, the job transitions to `FailedPendingRetry`
+    /// with retry time `now + base_delay * 2^(new_attempts - 1)`.
+    /// Otherwise it transitions to `Dead`.
+    pub fn fail(&mut self, id: JobId, now: Instant) -> Result<(), QueueError> {
+        let max_attempts = self.max_attempts;
+        let base_delay = self.base_delay;
+        let job = self.jobs.get_mut(&id).ok_or(QueueError::UnknownJob)?;
+        if job.state != JobState::Running {
+            return Err(QueueError::NotRunning);
+        }
+        job.attempts = job.attempts.saturating_add(1);
+        if job.attempts < max_attempts {
+            // Compute backoff = base_delay * 2^(new_attempts - 1) with
+            // saturation so we don't panic on overflow for unusual inputs.
+            let exp = job.attempts.saturating_sub(1);
+            let factor = 2u32.checked_pow(exp).unwrap_or(u32::MAX);
+            let delay = base_delay
+                .checked_mul(factor)
+                .unwrap_or(Duration::MAX);
+            let retry_at = now.checked_add(delay).unwrap_or_else(|| {
+                // Far enough in the future that nothing realistic will reach it.
+                now + Duration::from_secs(60 * 60 * 24 * 365 * 100)
+            });
+            job.state = JobState::FailedPendingRetry;
+            job.retry_at = Some(retry_at);
+        } else {
+            job.state = JobState::Dead;
+            job.retry_at = None;
+        }
+        Ok(())
+    }
+
+    /// The current state of the job, or `None` for an unknown id.
+    pub fn get_state(&self, id: JobId) -> Option<JobState> {
+        self.jobs.get(&id).map(|j| j.state)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn t0() -> Instant {
+        Instant::now()
+    }
+
+    #[test]
+    fn enqueue_and_state() {
+        let mut q = Queue::new(3, Duration::from_secs(1));
+        let id = q.enqueue("hello".to_string());
+        assert_eq!(q.get_state(id), Some(JobState::Pending));
+    }
+
+    #[test]
+    fn checkout_marks_running_and_excludes() {
+        let mut q = Queue::new(3, Duration::from_secs(1));
+        let id = q.enqueue("a".to_string());
+        let now = t0();
+        let co = q.checkout(now).expect("should check out");
+        assert_eq!(co.id(), id);
+        assert_eq!(co.payload(), "a");
+        assert_eq!(q.get_state(id), Some(JobState::Running));
+        // Cannot be checked out again while running.
+        assert!(q.checkout(now).is_none());
+    }
+
+    #[test]
+    fn succeed_transitions() {
+        let mut q = Queue::new(3, Duration::from_secs(1));
+        let id = q.enqueue("a".to_string());
+        let now = t0();
+        let _ = q.checkout(now).unwrap();
+        q.succeed(id).unwrap();
+        assert_eq!(q.get_state(id), Some(JobState::Succeeded));
+        assert!(q.succeed(id).is_err());
+    }
+
+    #[test]
+    fn fail_retries_then_dies() {
+        let mut q = Queue::new(2, Duration::from_millis(10));
+        let id = q.enqueue("a".to_string());
+        let now = t0();
+
+        // First failure -> FailedPendingRetry, retry_at = now + 10ms.
+        let _ = q.checkout(now).unwrap();
+        q.fail(id, now).unwrap();
+        assert_eq!(q.get_state(id), Some(JobState::FailedPendingRetry));
+
+        // Not yet runnable.
+        assert!(q.checkout(now).is_none());
+        // Runnable after retry delay.
+        let later = now + Duration::from_millis(10);
+        let co = q.checkout(later).unwrap();
+        assert_eq!(co.id(), id);
+
+        // Second failure exhausts attempts -> Dead.
+        q.fail(id, later).unwrap();
+        assert_eq!(q.get_state(id), Some(JobState::Dead));
+    }
+
+    #[test]
+    fn unknown_and_not_running_errors() {
+        let mut q = Queue::new(2, Duration::from_millis(10));
+        let bogus = JobId(999);
+        assert!(matches!(q.succeed(bogus), Err(QueueError::UnknownJob)));
+        assert!(matches!(q.fail(bogus, t0()), Err(QueueError::UnknownJob)));
+
+        let id = q.enqueue("x".to_string());
+        assert!(matches!(q.succeed(id), Err(QueueError::NotRunning)));
+        assert!(matches!(q.fail(id, t0()), Err(QueueError::NotRunning)));
+    }
+
+    #[test]
+    fn fifo_checkout_order() {
+        let mut q = Queue::new(3, Duration::from_secs(1));
+        let a = q.enqueue("a".to_string());
+        let b = q.enqueue("b".to_string());
+        let now = t0();
+        assert_eq!(q.checkout(now).unwrap().id(), a);
+        assert_eq!(q.checkout(now).unwrap().id(), b);
+    }
+}

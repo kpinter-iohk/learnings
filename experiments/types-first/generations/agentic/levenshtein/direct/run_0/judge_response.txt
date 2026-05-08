@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "The domain is intrinsically numeric (a distance metric returning usize), so there's little room for richer types; the chosen signature fits the spec well."},
+  "error_handling": {"score": 3, "justification": "The function is total and cannot fail, so returning usize without Result is correct, and there are no panics, unwraps, or expects."},
+  "api_ergonomics": {"score": 1, "justification": "The signature matches the spec and is narrow, but there is no doc comment on the public function and no module-level documentation."},
+  "idiomaticity": {"score": 2, "justification": "Uses iterators for char collection, mem::swap for row reuse, and chained .min() calls, though indexed loops with manual cost computation are slightly less idiomatic than an iterator-based formulation."}
+}

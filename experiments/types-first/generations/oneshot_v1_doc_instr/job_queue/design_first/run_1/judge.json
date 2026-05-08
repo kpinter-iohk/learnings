@@ -1,0 +1,17 @@
+{
+  "mode": "oneshot",
+  "task": "job_queue",
+  "treatment": "design_first",
+  "run": 1,
+  "type_expressiveness": 2,
+  "error_handling": 3,
+  "api_ergonomics": 3,
+  "idiomaticity": 2,
+  "total": 10,
+  "justifications": {
+    "type_expressiveness": "Newtype JobId, typed JobState and QueueError enums cover the main domain distinctions, though the internal Job uses an Option<Instant> for retry_at where state-specific data could be modeled into the JobState variants.",
+    "error_handling": "Typed QueueError with two distinguishing variants, Display implemented, no unwraps in library paths and the single expect has a clear reason after a just-located lookup.",
+    "api_ergonomics": "Narrow public surface with doc comments on every public item, sensible derives on JobId and JobState, Display on QueueError, and naming consistent with std conventions.",
+    "idiomaticity": "Generally idiomatic with ?, ok_or, map, and saturating/checked arithmetic, but the checkout loop uses an imperative scan with a mutable Option instead of an iterator chain like find."
+  }
+}

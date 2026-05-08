@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 2, "justification": "RomanError is a clean enum with distinguishing variants, though the (value, &str) tuple table could be a small typed struct."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with meaningful variants, no panics or unwraps, and the canonical re-encoding check ensures invalid forms are rejected."},
+  "api_ergonomics": {"score": 1, "justification": "Sensible derives and Display are present, but no doc comments on any public item (functions, error type, or variants)."},
+  "idiomaticity": {"score": 2, "justification": "Uses matches!, strip_prefix, and iterator-style table lookup idiomatically, but the round-trip canonical check is a slightly redundant idiom rather than tight parsing logic."}
+}

@@ -1,0 +1,6 @@
+{
+  "type_expressiveness": {"score": 3, "justification": "Newtypes wrap u64 IDs, AccountType is an enum, LedgerError is a typed enum with structured variants, and internal Account/Entry/Transaction types model the domain cleanly."},
+  "error_handling": {"score": 3, "justification": "Typed error enum with three meaningful variants, no panics in library paths, and the single expect() has a clear comment justifying that the invariant was just validated."},
+  "api_ergonomics": {"score": 3, "justification": "Every public item has doc comments, derives are complete (Copy/Clone/Eq/Hash/Debug on IDs, Display on error), naming follows std conventions, and the public surface is narrow."},
+  "idiomaticity": {"score": 3, "justification": "Uses iterator chains with map/collect, pattern matching, derives, matches! in tests, borrows entries before consuming, and avoids unnecessary clones; the i128 overflow guard is a thoughtful touch."}
+}

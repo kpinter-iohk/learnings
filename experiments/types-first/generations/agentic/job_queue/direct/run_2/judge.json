@@ -1,0 +1,17 @@
+{
+  "mode": "agentic",
+  "task": "job_queue",
+  "treatment": "direct",
+  "run": 2,
+  "type_expressiveness": 2,
+  "error_handling": 2,
+  "api_ergonomics": 1,
+  "idiomaticity": 2,
+  "total": 7,
+  "justifications": {
+    "type_expressiveness": "Uses a JobId newtype, JobState enum, and typed QueueError variants, though the internal Job struct uses an Option<Instant> for retry_at where state-encoded data could be more precise.",
+    "error_handling": "Typed QueueError enum with meaningful variants, Display impl, and no panics in operational paths; the constructor uses assert! without explicit documentation but it's a precondition check.",
+    "api_ergonomics": "Public surface is reasonable with sensible derives, but there are no doc comments on any public items and no Display for JobId.",
+    "idiomaticity": "Uses ?, iterator methods, derives, and avoids unnecessary clones in most places, though the checkout loop could use min_by_key and get_state clones JobState rather than returning a Copy variant."
+  }
+}

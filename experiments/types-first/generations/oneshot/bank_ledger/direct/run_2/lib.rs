@@ -1,0 +1,282 @@
+//! A simple double-entry ledger implemented using only the Rust standard
+//! library.
+//!
+//! The ledger keeps a set of accounts and a journal of transactions. Each
+//! transaction is a list of entries (account + signed amount) whose amounts
+//! must sum to exactly zero. Account balances are computed by summing every
+//! entry that references the account across all recorded transactions.
+
+use std::collections::HashMap;
+use std::fmt;
+
+/// Classification of an account.
+///
+/// The variant names are part of the public API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountType {
+    Asset,
+    Liability,
+    Equity,
+    Revenue,
+    Expense,
+}
+
+/// Opaque identifier for an account opened in a [`Ledger`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AccountId(u64);
+
+/// Opaque identifier for a transaction posted to a [`Ledger`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TransactionId(u64);
+
+/// Errors that can be produced by ledger operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LedgerError {
+    /// `post` was called with an empty entry list.
+    EmptyEntries,
+    /// An entry referenced an account id that has not been opened in this
+    /// ledger.
+    UnknownAccount(AccountId),
+    /// The signed entry amounts do not sum to zero.
+    Unbalanced { sum: i64 },
+}
+
+impl fmt::Display for LedgerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LedgerError::EmptyEntries => {
+                write!(f, "transaction has no entries")
+            }
+            LedgerError::UnknownAccount(id) => {
+                write!(f, "unknown account: {:?}", id)
+            }
+            LedgerError::Unbalanced { sum } => {
+                write!(
+                    f,
+                    "transaction is unbalanced: entries sum to {} (expected 0)",
+                    sum
+                )
+            }
+        }
+    }
+}
+
+/// Internal record of an account.
+#[derive(Debug, Clone)]
+struct Account {
+    #[allow(dead_code)]
+    name: String,
+    ty: AccountType,
+    balance: i64,
+}
+
+/// A single entry of a posted transaction.
+#[derive(Debug, Clone)]
+struct Entry {
+    account: AccountId,
+    amount: i64,
+}
+
+/// A recorded transaction.
+#[derive(Debug, Clone)]
+struct Transaction {
+    #[allow(dead_code)]
+    id: TransactionId,
+    #[allow(dead_code)]
+    entries: Vec<Entry>,
+}
+
+/// A double-entry ledger.
+#[derive(Debug, Default)]
+pub struct Ledger {
+    accounts: HashMap<AccountId, Account>,
+    transactions: Vec<Transaction>,
+    next_account_id: u64,
+    next_transaction_id: u64,
+}
+
+impl Ledger {
+    /// Create a new, empty ledger.
+    pub fn new() -> Self {
+        Ledger {
+            accounts: HashMap::new(),
+            transactions: Vec::new(),
+            next_account_id: 0,
+            next_transaction_id: 0,
+        }
+    }
+
+    /// Open a new account with the given name and type. Returns its id.
+    pub fn open_account(&mut self, name: String, ty: AccountType) -> AccountId {
+        let id = AccountId(self.next_account_id);
+        self.next_account_id += 1;
+        self.accounts.insert(
+            id,
+            Account {
+                name,
+                ty,
+                balance: 0,
+            },
+        );
+        id
+    }
+
+    /// Post a transaction to the ledger.
+    ///
+    /// The entry list must be non-empty, every referenced account must be
+    /// known to this ledger, and the signed amounts must sum to zero.
+    pub fn post(
+        &mut self,
+        entries: Vec<(AccountId, i64)>,
+    ) -> Result<TransactionId, LedgerError> {
+        if entries.is_empty() {
+            return Err(LedgerError::EmptyEntries);
+        }
+
+        // Validate all referenced accounts before computing the sum so the
+        // diagnostic prefers an unknown-account error over a balance error
+        // (this is a deliberate, but consistent, choice).
+        for (account, _) in &entries {
+            if !self.accounts.contains_key(account) {
+                return Err(LedgerError::UnknownAccount(*account));
+            }
+        }
+
+        // Sum amounts using i128 to avoid silent overflow on pathological
+        // inputs, then check the total fits in i64 and equals zero.
+        let mut sum: i128 = 0;
+        for (_, amount) in &entries {
+            sum += *amount as i128;
+        }
+        if sum != 0 {
+            // Saturate into i64 for the reported sum so Display always works.
+            let reported = if sum > i64::MAX as i128 {
+                i64::MAX
+            } else if sum < i64::MIN as i128 {
+                i64::MIN
+            } else {
+                sum as i64
+            };
+            return Err(LedgerError::Unbalanced { sum: reported });
+        }
+
+        let id = TransactionId(self.next_transaction_id);
+        self.next_transaction_id += 1;
+
+        // Apply entries: update running balances and record the transaction.
+        let recorded: Vec<Entry> = entries
+            .into_iter()
+            .map(|(account, amount)| {
+                let acct = self
+                    .accounts
+                    .get_mut(&account)
+                    .expect("account presence was validated above");
+                acct.balance = acct.balance.wrapping_add(amount);
+                Entry { account, amount }
+            })
+            .collect();
+
+        self.transactions.push(Transaction {
+            id,
+            entries: recorded,
+        });
+
+        Ok(id)
+    }
+
+    /// Return the running balance of an account: the sum of all amounts
+    /// posted to it.
+    pub fn balance(&self, id: AccountId) -> Result<i64, LedgerError> {
+        match self.accounts.get(&id) {
+            Some(acct) => Ok(acct.balance),
+            None => Err(LedgerError::UnknownAccount(id)),
+        }
+    }
+
+    /// Return the type of an account, or `None` if the id is unknown.
+    pub fn account_type(&self, id: AccountId) -> Option<AccountType> {
+        self.accounts.get(&id).map(|a| a.ty)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_and_query_account() {
+        let mut l = Ledger::new();
+        let cash = l.open_account("Cash".to_string(), AccountType::Asset);
+        assert_eq!(l.account_type(cash), Some(AccountType::Asset));
+        assert_eq!(l.balance(cash), Ok(0));
+    }
+
+    #[test]
+    fn post_balanced_transaction() {
+        let mut l = Ledger::new();
+        let cash = l.open_account("Cash".to_string(), AccountType::Asset);
+        let rev = l.open_account("Revenue".to_string(), AccountType::Revenue);
+        let tx = l.post(vec![(cash, 100), (rev, -100)]).unwrap();
+        let _ = tx; // ensure TransactionId is returned
+        assert_eq!(l.balance(cash).unwrap(), 100);
+        assert_eq!(l.balance(rev).unwrap(), -100);
+    }
+
+    #[test]
+    fn empty_entries_rejected() {
+        let mut l = Ledger::new();
+        assert_eq!(l.post(vec![]), Err(LedgerError::EmptyEntries));
+    }
+
+    #[test]
+    fn unbalanced_rejected() {
+        let mut l = Ledger::new();
+        let a = l.open_account("A".to_string(), AccountType::Asset);
+        let b = l.open_account("B".to_string(), AccountType::Equity);
+        let err = l.post(vec![(a, 10), (b, -9)]).unwrap_err();
+        match err {
+            LedgerError::Unbalanced { sum } => assert_eq!(sum, 1),
+            other => panic!("expected Unbalanced, got {:?}", other),
+        }
+        // Balances should not have changed.
+        assert_eq!(l.balance(a).unwrap(), 0);
+        assert_eq!(l.balance(b).unwrap(), 0);
+    }
+
+    #[test]
+    fn unknown_account_rejected() {
+        let mut l1 = Ledger::new();
+        let mut l2 = Ledger::new();
+        let a = l1.open_account("A".to_string(), AccountType::Asset);
+        let b = l2.open_account("B".to_string(), AccountType::Equity);
+        // `b` belongs to l2, not l1.
+        let err = l1.post(vec![(a, 5), (b, -5)]).unwrap_err();
+        match err {
+            LedgerError::UnknownAccount(_) => {}
+            other => panic!("expected UnknownAccount, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn balance_unknown_account_errors() {
+        let l = Ledger::new();
+        let phantom = AccountId(999);
+        assert!(matches!(
+            l.balance(phantom),
+            Err(LedgerError::UnknownAccount(_))
+        ));
+        assert_eq!(l.account_type(phantom), None);
+    }
+
+    #[test]
+    fn multi_entry_balanced() {
+        let mut l = Ledger::new();
+        let a = l.open_account("A".to_string(), AccountType::Asset);
+        let b = l.open_account("B".to_string(), AccountType::Asset);
+        let c = l.open_account("C".to_string(), AccountType::Equity);
+        l.post(vec![(a, 30), (b, 70), (c, -100)]).unwrap();
+        assert_eq!(l.balance(a).unwrap(), 30);
+        assert_eq!(l.balance(b).unwrap(), 70);
+        assert_eq!(l.balance(c).unwrap(), -100);
+    }
+}
