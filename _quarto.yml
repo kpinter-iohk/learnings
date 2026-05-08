@@ -3,6 +3,8 @@ project:
   output-dir: _site
   resources:
     - robots.txt
+  render:
+    - "*.qmd"
 
 website:
   title: "Learnings"
@@ -12,6 +14,8 @@ website:
         text: LLM Failure Modes
       - href: claude-code-models.qmd
         text: Claude Code Models
+      - href: types-first-prompting.qmd
+        text: Types-First Prompting
 
 format:
   html:

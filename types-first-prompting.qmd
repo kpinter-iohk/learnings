@@ -1,0 +1,140 @@
+---
+title: "Should You Prompt Claude to Design Rust Types First?"
+subtitle: "Tested across 60 generations of small Rust libraries: no measurable quality benefit, ~50% more iterations"
+toc: true
+toc-depth: 3
+toc-title: "Contents"
+number-sections: false
+format:
+  html:
+    page-layout: article
+    smooth-scroll: true
+---
+
+## The question
+
+If you write Rust through Claude Code, you've probably wondered whether to ask the model to "design the types and signatures first, then implement" instead of just "implement this." It's a long-standing prescription in typed-language communities[^minsky][^brady][^king] — get the data shapes right and the implementation falls out. Does the same apply when the implementer is Claude?
+
+[^minsky]: Yaron Minsky, "Effective ML" lectures and writing at Jane Street, ~2010–2011 — the source of "make illegal states unrepresentable."
+[^brady]: Edwin Brady, *[Type-Driven Development with Idris](https://www.manning.com/books/type-driven-development-with-idris)*, Manning Publications, 2017.
+[^king]: Alexis King, ["Parse, don't validate"](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/), 2019 — the variant most cited in Rust circles.
+
+## What I tested
+
+Two prompts, same task spec each time:
+
+- **Direct.** *"Implement the spec. Verify it compiles."*
+- **Design-first.** *"Step 1: design data types and function signatures with `todo!()` bodies. Verify it compiles. Step 2: replace bodies with real implementations."*
+
+Five Rust library specs, three runs per cell, two harness modes (oneshot — single CLI call, no tools — and agentic — `claude` with `Bash`/`Edit`/`Read`/`Write` and an iterative loop, which is how real Claude Code usage works). Total: **60 generations**, all with `claude-opus-4-7`.
+
+The five tasks were chosen for spread on the types-design axis:
+
+| Task | Position |
+|---|---|
+| Tiny scripting language (parser + AST + evaluator) | High — recursive types, error variants |
+| Job queue with retries (state machine, clock injection) | High — discrete states |
+| Bank ledger (double-entry, account types) | High — domain modeling |
+| Roman numeral converter | Low — algorithmic |
+| Levenshtein distance | Low — pure algorithm |
+
+Each generation was scored three ways: pre-written integration tests, an LLM-as-judge rubric (4 dimensions, 0–3 each, mapped to the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/) and `clippy::pedantic`), and a set of mechanical idiom metrics computed by text analysis (doc-comment coverage, derive coverage, panic counts, etc.). The judge is `claude-opus-4-7` — the same model that wrote the code, prompted with empty system prompt, no tools, and no treatment label. Same-model judging is a known limitation; the mechanical metrics are the cross-check.
+
+N=3 per cell — enough to see whether the effect direction is consistent across runs, not enough for tight effect-size confidence intervals on a small effect. Sample-size implications come up at the end.
+
+## The result
+
+::: {.callout-note icon=false}
+## Per-cell rubric totals (out of 12), with per-run scores
+
+| Mode | Task | Direct (3 runs) | Design-first (3 runs) | Δ mean |
+|---|---|---|---|---:|
+| oneshot | scripting | 8, 8, 8 | 7, 7, 7 | −1.0 |
+| oneshot | job_queue | 7, 7, 7 | 9, 10, 8 | **+2.0** |
+| oneshot | roman | 12, 12, 12 | 10, 12, 11 | −1.0 |
+| oneshot | bank_ledger | 7, 7, 12 | 12, 9, 9 | +1.3 |
+| oneshot | levenshtein | 9, 9, 8 | 10, 7, 8 | −0.3 |
+| agentic | scripting | 8, 7, 7 | 7, 7, 7 | −0.3 |
+| agentic | job_queue | 7, 7, 7 | 7, 7, 7 | 0 |
+| agentic | roman | 8, 8, 8 | 8, 7, 8 | −0.3 |
+| agentic | bank_ledger | 7, 9, 7 | 9, 7, 9 | +0.7 |
+| agentic | levenshtein | 8, 9, 8 | 8, 8, 8 | −0.3 |
+
+**Mean Δ = +0.07 / 12.** By cell-mean count, direct edges design-first 6–3 with one tie. By total tally across all 30 runs per side, direct scores 235 and design-first 232 — well inside run-to-run variance. There's no defensible directional finding.
+:::
+
+The agentic deltas live in [−0.3, +0.7]. Oneshot is wider — within-cell stdev runs up to ~1.7 on bank_ledger, where a single run-to-run swing is larger than any treatment effect we measured. The +2.0 on oneshot/job_queue (the largest design-first delta) comes from a 9/10/8 vs. a tight 7/7/7 — a real cell where design-first wins, but its magnitude is on the same order as the noise on adjacent cells.
+
+The mechanical idiom metrics agree: in agentic mode, doc-comment coverage is 0/0 across all five tasks for both treatments. Derive coverage, panic counts, newtype usage, and clippy warning density are tied or mixed in direction. There's no systematic mechanical signature distinguishing one treatment's output from the other's.
+
+**Correctness:** 59 of 60 generations pass 100% of integration tests. The lone failure is `oneshot/levenshtein/design_first/run_1` — the model split its output into two code blocks (types in one, implementation in the other), and the largest-block extractor pulled only the implementation, leaving undefined types. A real failure mode of two-step protocols in pure-text mode; doesn't happen in agentic mode where the agent writes to a real file.
+
+**Iteration count is where the protocol overhead shows up — but only there:**
+
+| Metric (agentic mode, mean across 15 runs/treatment) | Direct | Design-first |
+|---|---:|---:|
+| Turns to completion | 5.7 | **8.5** |
+| `cargo build` invocations | 1.2 | **2.2** |
+| Wall-clock seconds | 64 | 63 |
+| Token cost per generation | $0.31 | $0.32 |
+
+Design-first uses **about 50% more turns and 80% more cargo cycles** — the protocol explicitly demands one extra build cycle (verify the skeleton compiles, *then* verify the implementation). But wall-clock and token cost are tied: each design-first turn is smaller (a `todo!()` skeleton is less to write than a full impl), and the totals come out the same. The user-visible difference is just *more iterations to watch scroll by* for the same final result.
+
+## What direct vs. design-first actually look like
+
+The differences are modest. From `bank_ledger/run_0` in agentic mode:
+
+```rust
+// DIRECT
+pub enum LedgerError {
+    EmptyEntries,
+    UnknownAccount(AccountId),
+    Unbalanced(i128),
+}
+struct Account { name: String, ty: AccountType, balance: i64 }   // cached balance
+// post(): two-pass — check unknown accounts, sum entries (i128), mutate cached balances
+```
+
+```rust
+// DESIGN-FIRST
+pub enum LedgerError {
+    EmptyEntries,
+    UnknownAccount(AccountId),
+    Unbalanced { sum: i64 },
+}
+struct Account { name: String, ty: AccountType }                 // no cache
+// post(): one-pass with saturating_add; balance() recomputes from transaction history
+```
+
+Direct picked a cached-balance / walk-twice / `i128`-for-overflow design. Design-first picked a compute-on-demand / walk-once / `saturating_add` design. Different sensible choices, similar code, judged within a point of each other.
+
+## What this means if you're writing Rust through Claude Code
+
+For Rust library tasks of moderate complexity (roughly 90–650 LOC) that are within `claude-opus-4-7`'s reliable competency, **types-first prompting buys nothing measurable**. Correctness is identical (100% test pass on 59/60 cells). Rubric quality is indistinguishable within run-to-run variance. The mechanical idiom indicators are tied. The only robust effect is that the two-step protocol uses about 50% more turns to reach the same place.
+
+So: just ask for the thing.
+
+Where this might not apply:
+
+- **Tasks beyond the model's reliable competency.** If even the agentic loop struggles to converge, the design phase might genuinely steer. Untested here.
+- **Smaller models.** Haiku and Sonnet may benefit more from structured guidance than Opus does. Untested here.
+
+## What this also tells you about Claude Code
+
+Two side observations from running 60 generations through the agent loop, both useful for prompting in general:
+
+**The agent loop edits toward "passes the test."** Both prompting strategies converged to identical correctness across all five tasks. Whatever scaffolding you provide gets reshaped by iteration. If you want to influence what the agent ships, you have to influence what it does *during* iteration, not just what it begins with — elaborate opening prompts get absorbed.
+
+**Claude writes good Rust by default on tasks of this size.** Across all 60 generations, the model spontaneously used enums for discrete states, newtypes where the spec required them, `Result` over panics, and idiomatic iterator chains. You don't need to coach it toward Rust style. You do still need to give it a complete spec.
+
+## Code and data
+
+The experiment lives at `experiments/types-first/` in this repo:
+
+- `tasks/` — five spec markdown files plus matching integration test suites in Rust.
+- `prompts/` — four prompt templates (direct/design-first × oneshot/agentic).
+- `runner/` — agentic runner, oneshot runner, LLM-judge scorer, mechanical-metrics computer.
+- `generations/` — every prompt, response, transcript, and `lib.rs` from every cell.
+- `results/` — CSV aggregates; `*_v1.csv` files preserve the contaminated initial run.
+
+Reproduction: `claude-opus-4-7` via the Claude Code CLI (subscription auth), default temperature, agentic harness with `Bash,Edit,Read,Write` tools and empty system prompt, oneshot harness with no tools and empty system prompt. For tight effect-size confidence intervals on a small effect this experiment may have missed, you'd want N=10 per cell rather than N=3 — at the current sample size, an effect smaller than ~1 point on the 12-point rubric is undetectable. Total spend across all sweeps was ~$30 in subscription tokens.

@@ -1,0 +1,35 @@
+version: "0.2"
+language: en
+
+words:
+  # Technical terms used in articles
+  - agentic
+  - oneshot
+  - clippy
+  - newtype
+  - newtypes
+  - rustc
+  - rustfmt
+  - subagent
+  - subagents
+  - LSP
+  - tokei
+  - cspell
+  - stdev
+  - i128
+  - subtractive
+
+  # Proper nouns from citations and references
+  - Yaron
+  - Minsky
+  - Idris
+  - Brady
+  - Wlaschin
+  - lexi
+  - lambda
+  - Anthropic
+  - Quarto
+  - Levenshtein
+
+  # Repo-specific identifiers
+  - unrepresentable
