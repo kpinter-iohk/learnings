@@ -33,3 +33,76 @@ words:
 
   # Repo-specific identifiers
   - unrepresentable
+
+  # Zero-knowledge proofs article: cryptography terms
+  - arithmetization
+  - backronym
+  - multilinear
+  - multiset
+  - Noninteractive
+  - Oecumenical
+  - Plonkish
+  - plookup
+  - polylog
+  - polylogarithmic
+  - PSPACE
+  - rollup
+  - rollups
+  - simulatable
+  - SNAR
+  - starks
+  - sublinear
+  - zkevm
+  - zkvm
+  - gridlines
+  - personhood
+  - ASIC
+  - Diffie
+  - Keccak
+  - Merkle
+
+  # ZK systems, tools, and proper nouns
+  - arkworks
+  - Brakedown
+  - circom
+  - gnark
+  - hyperplonk
+  - Ligero
+  - Linea
+  - Monero
+  - Plonky
+  - proofsize
+  - snarkjs
+  - Zcash
+  - zkVM
+
+  # People and places (citations)
+  - Bowe
+  - Buterin
+  - Gennaro
+  - Goldwasser
+  - Groth
+  - Kilian
+  - Micali
+  - Parno
+  - Quisquater
+  - Rackoff
+  - Raykova
+  - Schnorr
+  - Shamir
+  - Snowden
+  - Vitalik
+  - Zippel
+
+  # BibTeX citation-key fragments (cspell scans the source)
+  - almss
+  - arorasafra
+  - bcct
+  - BCTV
+  - bellaregoldreich
+  - bellarerogaway
+  - fiatshamir
+  - goldwasserkalai
+  - lfkn
+  - proofsystem
+  - trustedsetup

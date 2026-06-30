@@ -1,0 +1,593 @@
+---
+title: "A Field Guide to Zero-Knowledge Proofs"
+subtitle: "From a cave with two tunnels to RISC-V running under a proof - the history, the math you can skip, and what all the *-ARKs actually are"
+toc: true
+toc-depth: 3
+toc-title: "Contents"
+number-sections: false
+css: zk-proofs.css
+bibliography: zk-proofs.bib
+csl: https://www.zotero.org/styles/ieee
+link-citations: true
+citations-hover: true
+format:
+  html:
+    page-layout: article
+    smooth-scroll: true
+---
+
+## Why this article exists
+
+You already know the one-sentence version: a zero-knowledge proof lets you convince someone that a statement is true without revealing anything beyond the fact that it is true. You can prove you know a password without sending it, prove you are over 18 without showing your birthday, prove a thousand transactions are valid without replaying any of them.
+
+That sentence is where most explanations stop and where the confusion starts. Because the moment you go looking, you hit a wall of names - SNARK, STARK, Groth16, PLONK, Marlin, Sonic, Halo, Nova, Spartan, Bulletproofs, Ligero, Brakedown, Jolt - plus a second wall of tools that *sound* like proof systems but are not (arkworks, gnark, circom, snarkjs). It reads like a zoo with no signs on the cages.
+
+This article is the missing signage. The plan:
+
+1. **Make the idea precise** - the three properties every ZK proof must have, and the one weird trick (a "simulator") that makes "zero knowledge" a mathematical statement rather than a vibe.
+2. **Build one real protocol by hand** - Schnorr's, which you can follow with high-school algebra. This is the seed from which everything else grows.
+3. **Take the two big leaps** - from "I know a secret number" to "I ran this entire program correctly," and from "we talk back and forth" to "here is a single file you can check offline."
+4. **Hand you the decoder ring** - the realization that almost every modern system is the same two-part recipe with different parts swapped in. Once you see the recipe, the zoo collapses into a small number of families.
+5. **Tour the families and the practice** - the pairing-based SNARKs and their trusted-setup ceremonies, the transparent hash-based STARKs, the folding schemes, and the zkVMs (RISC Zero in particular) that let you stop writing circuits and just compile a Rust program.
+6. **Connect it to the world** - private money, rollups, and the rest - and the brutal cost asymmetry that shapes all of it.
+
+The math is here when it helps, but it lives in clearly marked **"Under the hood"** boxes you can skip without losing the thread. The target reader is a working software engineer: comfortable with hashing, public-key crypto, and big-O, not necessarily with elliptic curves or finite fields.
+
+::: {.callout-note icon=false}
+## How to read the jargon
+
+This field loves acronyms that are themselves arguments. I will unpack each one the first time it matters, and there is a [glossary](#glossary) at the end. Two worth pinning up front: **SNARK** = *Succinct Non-interactive ARgument of Knowledge*, and **STARK** = *Scalable Transparent ARgument of Knowledge*. Every other "-ARK" is a variation on those two themes.
+:::
+
+---
+
+## Part 1 - The idea, made precise
+
+### Three properties, one cave
+
+The canonical intuition pump is the **Ali Baba cave**, from a 1989 paper literally titled "How to Explain Zero-Knowledge Protocols to Your Children" [@quisquater1990]. Picture a ring-shaped cave with a single entrance that forks into two tunnels, left and right, joined at the back by a door that only opens with a secret word.
+
+Peggy (the prover) claims she knows the word. Victor (the verifier) wants to be convinced without learning the word himself. So:
+
+1. Victor waits outside while Peggy walks in and picks a tunnel at random.
+2. Victor steps to the fork and shouts which side he wants her to come out of - left or right.
+3. If Peggy knows the word, she can always comply: if she is already on the right side, she walks out; if not, she opens the door and crosses. If she *doesn't* know the word, she can only comply when she happened to pick the side Victor names - a 50/50 guess.
+
+One round, and a liar gets caught half the time. Run it twenty times and a liar's odds of surviving are `(1/2)^20`, about one in a million. Crucially, Victor learns nothing about the word: all he ever sees is Peggy emerging from the side he requested, which tells him nothing he couldn't have scripted himself.
+
+That story encodes the three properties that *define* a zero-knowledge proof, formalized in 1985 by Goldwasser, Micali, and Rackoff in the paper that started the field [@gmr1985]:
+
+- **Completeness** - if the statement is true and both parties play fair, the verifier is convinced. (Peggy, who knows the word, always gets out the right side.)
+- **Soundness** - if the statement is false, no cheating prover can convince the verifier except with tiny probability. (A liar gets caught, with probability driven toward 1 by repetition.)
+- **Zero-knowledge** - the verifier learns nothing except that the statement is true. This is the subtle one, and it needs its own paragraph.
+
+### The simulator: what "learns nothing" actually means
+
+How do you *prove* that someone learned nothing? Goldwasser, Micali, and Rackoff's answer is one of the most elegant moves in cryptography, the **simulator** [@gmr1985].
+
+Claim: an interaction reveals zero knowledge if a forger with **no access to the secret** could produce a fake transcript that is indistinguishable from a real one. The logic: if a transcript of the "proof" could have been fabricated by someone who knows nothing, then the transcript itself cannot contain any knowledge - there was nothing in it that required the secret to produce.
+
+In the cave: a film of Peggy walking out the left side, then the right side, then the left again, looks exactly the same whether she knows the word or got lucky on every coin flip and a film editor stitched the lucky takes together. The transcript is "simulatable," therefore it leaks nothing. This is why zero-knowledge is a property you can prove rather than merely assert.
+
+::: {.callout-note icon=false}
+## Flavors of "indistinguishable"
+
+How alike must the fake and real transcripts be? Three settings, in decreasing strength: **perfect** (identical distributions), **statistical** (different by a negligible amount), and **computational** (telling them apart is possible in principle but computationally infeasible). Most fast, practical systems settle for computational zero-knowledge - the same kind of "secure because nobody has enough compute" guarantee that protects your TLS connection.
+:::
+
+### Interactive proofs, and why the prover can be a demon
+
+The framework underneath all this is the **interactive proof**: a probabilistic, back-and-forth conversation between a polynomial-time verifier and a prover of *unbounded* power. The verifier is the realist - he must run efficiently. The prover can be a computational demon. The remarkable theorem here, proved by Shamir in 1990, is **IP = PSPACE** [@shamir1992]: the set of statements provable this way is exactly the set solvable with polynomial *memory* - an enormous class. Interaction plus randomness buys a startling amount of verifiable power. The technique behind it (encoding logic as polynomials, then spot-checking them) is the same idea that, two decades later, makes SNARKs work.
+
+### Proof versus argument, membership versus knowledge
+
+Two distinctions that explain half the names in the zoo:
+
+- **Proof vs argument.** A *proof* is sound even against a computationally unbounded cheater. An *argument* is sound only against a cheater bounded to polynomial time - it relies on some problem being hard to break [@bcc1988]. Almost everything practical and succinct is technically an *argument* (that is the "AR" in SN-AR-K). The words get used loosely; the distinction is real.
+- **Membership vs knowledge.** Proving *membership* shows a statement is true ("this Sudoku has a solution"). A **proof of knowledge** shows the prover actually *possesses* a witness ("I have a solution in hand"). This is pinned down by a **knowledge extractor**: a hypothetical algorithm that, by replaying the prover with different challenges, can pull the secret out of it [@bellaregoldreich1992]. If the secret can be extracted from a convincing prover, the prover must have known it. That is the "K" in SNAR-**K**.
+
+---
+
+## Part 2 - One protocol you can follow by hand
+
+Abstraction is cheap; let's build a real one. The **Schnorr protocol** [@schnorr1991] proves "I know the secret key behind this public key" and is the cleanest example of a **Sigma protocol** - the three-move shape that underlies a huge fraction of applied ZK.
+
+The setup is ordinary public-key crypto. Fix a large group where multiplication is easy but "division" (the discrete logarithm) is infeasible - exactly the assumption behind classic Diffie-Hellman. There is a public generator `g`. Peggy's secret key is a number `x`; her public key is `y = g^x`. She wants to prove she knows `x` without revealing it.
+
+The conversation has exactly three moves - **commit, challenge, response** - which is what "Sigma" (the shape of the letter) refers to:
+
+```{mermaid}
+%%| fig-cap: "The Sigma protocol: commit, challenge, response. Three messages, and the verifier never sees x."
+sequenceDiagram
+    participant P as Peggy (knows x)
+    participant V as Victor
+    Note over P: pick random r<br/>compute a = g^r
+    P->>V: commitment a
+    Note over V: pick random challenge c
+    V->>P: challenge c
+    Note over P: compute z = r + c*x
+    P->>V: response z
+    Note over V: accept iff g^z == a * y^c
+```
+
+Why the final check works is one line of algebra: `g^z = g^(r + c*x) = g^r * (g^x)^c = a * y^c`. An honest Peggy always passes - that's completeness.
+
+The magic is in the other two properties, and this is where you see the machinery from Part 1 made concrete:
+
+::: {.callout-note icon=false}
+## Under the hood: soundness and zero-knowledge, in algebra
+
+**Special soundness (why a liar is stuck).** Suppose Peggy could answer *two different* challenges `c` and `c'` for the same commitment `a`, giving responses `z` and `z'`. Both pass the check, so `g^z = a*y^c` and `g^{z'} = a*y^{c'}`. Divide the two equations and the `a` cancels: `g^{z-z'} = y^{c-c'} = g^{x(c-c')}`. Therefore `x = (z - z') / (c - c')`. Two accepting answers to two challenges *are* the secret key - this is the knowledge extractor in the flesh. A prover who doesn't know `x` can answer at most one challenge per commitment, so cheating works only by guessing `c` in advance, which is negligibly likely.
+
+**Honest-verifier zero-knowledge (why Victor learns nothing).** Run the protocol backwards. Pick the response `z` and the challenge `c` first, both at random, then *define* `a = g^z * y^{-c}`. The triple `(a, c, z)` satisfies `g^z = a * y^c` by construction - it passes the verifier's check perfectly - yet it was generated with no knowledge of `x` whatsoever. That's the simulator: anyone can produce convincing-looking transcripts, so a real transcript carries no extractable knowledge.
+:::
+
+There is a catch in the name: *honest-verifier* zero-knowledge assumes Victor picks his challenge `c` honestly at random. A cheating verifier who chooses `c` cleverly might learn more. Real systems either upgrade to full (malicious-verifier) zero-knowledge with extra machinery, or - far more commonly - eliminate the human verifier entirely. Which is the next leap.
+
+<!-- WIDGET_IDEA - Interactive Schnorr playground. Small group (e.g. integers mod a prime), let the reader pick x, watch a = g^r, type a challenge c, see z computed and the verification equation balance. A second tab "be a liar": no x, show that you can satisfy at most one challenge per commitment. Drives home special soundness viscerally. -->
+
+### Killing the conversation: the Fiat-Shamir transform
+
+Interactive proofs have an obvious practical problem: both parties must be online, exchanging messages, and the proof convinces only the one verifier who supplied the random challenge. You cannot put an interactive proof in a file, post it to a blockchain, or hand it to a thousand verifiers at once.
+
+The **Fiat-Shamir transform** [@fiatshamir1986], from 1986, removes the verifier with a beautifully cheeky idea: replace the verifier's random challenge with the **hash of everything so far**. Instead of waiting for Victor to send `c`, Peggy computes `c = H(g, y, a)` herself, using a cryptographic hash function. She can't game it - she has already committed to `a` before the hash fixes `c`, and she can't predict a hash's output - so the hash behaves like an impartial random challenger that needs no human.
+
+The result is a **non-interactive** proof: a single string `(a, z)` that anyone can verify by recomputing the hash. Fold a message into the hash - `c = H(g, y, a, m)` - and you've turned the identification protocol into a **digital signature**. That is exactly what a Schnorr signature is, and EdDSA (the signatures behind modern SSH and many blockchains) is a direct descendant.
+
+::: {.callout-note icon=false}
+## The asterisk on Fiat-Shamir: the random oracle
+
+Fiat-Shamir is provably secure only in the **Random Oracle Model** [@bellarerogaway1993] - a fiction in which the hash is a perfect random function. Real hashes (SHA-256, Keccak) are not that, and there exist contrived schemes that are secure with a true random oracle but broken under *any* concrete hash [@goldwasserkalai2003]. In practice Fiat-Shamir is trusted everywhere and rarely bites - but implementation bugs where the hash omits some input (the so-called "weak Fiat-Shamir" / "Frozen Heart" class of vulnerabilities) have broken real deployed systems. The rule is iron: hash *everything* public.
+:::
+
+---
+
+## Part 3 - The leap to general computation
+
+Schnorr proves knowledge of one number. The dream is bigger: prove "I correctly ran this arbitrary program and got this output" - prove the execution of a database query, a tax calculation, an entire virtual machine - with a proof that is **tiny and fast to check** no matter how huge the computation was. That property has a name.
+
+### What "succinct" buys you, and why it's surprising
+
+A **SNARK** is a *Succinct Non-interactive ARgument of Knowledge*. "Succinct" is the load-bearing word: the proof size and the verification time are roughly **constant or polylogarithmic** in the size of the computation [@thaler-misconceptions]. Prove that you ran a billion-step computation, and the verifier checks a few hundred bytes in milliseconds - faster than reading the computation's *input*, let alone re-running it.
+
+That should feel impossible. How can checking a proof be cheaper than doing the work? The conceptual permission slip is the **PCP theorem** (1992): every NP statement has a "probabilistically checkable proof" that a verifier can be convinced of by inspecting only a *constant number* of randomly chosen bits [@arorasafra1998; @almss1998]. You don't read the proof; you spot-check it in a few random places, and the encoding is so rigid that any flaw is overwhelmingly likely to show up wherever you happen to poke.
+
+The line from theory to practice runs through two papers. Kilian (1992) showed how to make spot-checking cheap to *communicate*: commit to a giant PCP with a Merkle tree, then reveal only the few queried positions with their Merkle paths [@kilian1992]. Micali (1994/2000) then applied Fiat-Shamir to make it non-interactive - his "computationally sound proofs" are the direct ancestor of every SNARK [@micali2000]. The term "SNARK" itself was coined in 2012 [@bcct2012].
+
+### The arithmetization pipeline: from code to one polynomial check
+
+Here is the central trick of the entire applied field. To prove a computation, you don't reason about the program - you **re-encode it as algebra**, through a pipeline of faithful translations, until "the program ran correctly" becomes "this one polynomial equation holds." The cleanest walkthrough is Vitalik Buterin's "QAP from Zero to Hero" [@vitalik-qap]; here is the shape of it.
+
+```{mermaid}
+%%| fig-cap: "Arithmetization: each arrow is a faithful re-encoding. The program's correctness survives all the way down to a single divisibility check on polynomials."
+graph LR
+    A["<b>Program</b><br/>x*x*x + x + 5"] --> B["<b>Arithmetic circuit</b><br/>gates: +, x<br/>over a finite field"]
+    B --> C["<b>R1CS</b><br/>one constraint<br/>per gate:<br/>(A.s)(B.s)=(C.s)"]
+    C --> D["<b>QAP</b><br/>constraints become<br/>polynomials"]
+    D --> E["<b>One check</b><br/>does t(x) divide<br/>A(x)B(x)-C(x)?"]
+    style A fill:#0891b2,color:#fff,stroke:none
+    style B fill:#0d9488,color:#fff,stroke:none
+    style C fill:#16a34a,color:#fff,stroke:none
+    style D fill:#7c3aed,color:#fff,stroke:none
+    style E fill:#db2777,color:#fff,stroke:none
+```
+
+Walking the arrows:
+
+1. **Program to arithmetic circuit ("flattening").** Break the computation into the most primitive steps possible - each one a single addition or multiplication of two values in a finite field. The computation `x^3 + x + 5` becomes a little network of gates with named intermediate wires. A circuit is just a DAG of these `+` and `x` gates.
+2. **Circuit to R1CS** (Rank-1 Constraint System). Each gate becomes one constraint of the rigid form `(A . s) * (B . s) = (C . s)`, where `s` is the **witness** vector holding the value on every wire (inputs, outputs, and all intermediates) and `A, B, C` are vectors that pick out which wires feed this gate. The whole program becomes a stack of these "one multiplication each" constraints. The witness is the secret; the constraints are public.
+3. **R1CS to QAP** (Quadratic Arithmetic Program). Here's the clever compression. Assign constraint #1 to the point `x=1`, #2 to `x=2`, and so on, then interpolate polynomials through those points. The pile of separate constraints becomes three polynomials `A(x), B(x), C(x)` with the property that evaluating at `x=k` reproduces constraint number `k`.
+4. **The single check.** If *every* constraint holds, then `A(x)*B(x) - C(x)` is zero at all the points `1, 2, ..., n` - which means it is divisible by the "vanishing polynomial" `t(x) = (x-1)(x-2)...(x-n)`. So the entire claim "I correctly executed this program" collapses into **one question**: does `t(x)` divide `A(x)B(x) - C(x)` cleanly, with no remainder?
+
+::: {.callout-note icon=false}
+## Why this shape is the whole game
+
+Polynomials have a magical property (the Schwartz-Zippel lemma): two *different* polynomials of low degree can agree at only a few points. So if the prover commits to her polynomials and the verifier checks the divisibility equation at a *single random point*, a cheating prover - whose equation does not really hold - gets caught with overwhelming probability. "Run a billion steps" became "evaluate a polynomial at one random spot." That is the engine of succinctness, and almost every system in the zoo is a different way to commit to polynomials and check them at random points.
+:::
+
+<!-- WIDGET_IDEA - Arithmetization visualizer. Input box for a tiny expression (default x^3 + x + 5), live-render: the flattened gate list, the R1CS matrices A/B/C with a sample witness vector highlighted, and the resulting polynomials plotted with the vanishing points marked. Let the reader tamper with one witness value and watch A(x)B(x)-C(x) stop vanishing at the bad point. -->
+
+---
+
+## Part 4 - The decoder ring
+
+Now the payoff that makes the zoo navigable. Strip away the marketing and **almost every modern SNARK is the same two-layer recipe** [@thaler-book]:
+
+```{mermaid}
+%%| fig-cap: "The modern recipe. Pick an information-theoretic protocol, plug in a commitment scheme, sprinkle Fiat-Shamir. The two choices in the middle generate almost the entire zoo."
+graph TB
+    subgraph L1["Layer 1 - Polynomial IOP (information-theoretic)"]
+      direction LR
+      I1["arithmetization<br/>R1CS / Plonkish / AIR"] --> I2["interactive protocol<br/>over polynomial 'oracles'"]
+    end
+    subgraph L2["Layer 2 - make it real"]
+      direction LR
+      C1["Polynomial commitment<br/>KZG / FRI / IPA / code-based"] --> C2["Fiat-Shamir<br/>remove interaction"]
+    end
+    L1 --> L2 --> OUT["A concrete SNARK / STARK"]
+    style L1 fill:#eef2ff,stroke:#6366f1
+    style L2 fill:#f0fdf4,stroke:#16a34a
+    style OUT fill:#7c3aed,color:#fff,stroke:none
+```
+
+- **Layer 1, the polynomial IOP** (Interactive Oracle Proof). An idealized protocol in which the prover hands the verifier *polynomial oracles* - magic objects you can query at any point - and the verifier bounces random challenges off them. This layer is **information-theoretically** secure: it assumes the oracles are real and asks only whether the algebra forces honesty. This is where "R1CS vs Plonkish vs AIR" lives - different ways of phrasing the computation as polynomial identities.
+- **Layer 2, the polynomial commitment scheme** (PCS). Real provers can't send magic oracles, so you replace each oracle with a short cryptographic **commitment** to the polynomial. An oracle query becomes "open the commitment at this point and prove the value." This is the layer that injects *cryptographic* assumptions and determines the system's entire personality - proof size, whether it needs a trusted setup, whether it survives quantum computers.
+- Then **Fiat-Shamir** removes the interaction, and you have a deployable SNARK.
+
+The single most important sentence in this article: **the choice of polynomial commitment scheme is the fork in the road that defines the families.** There are essentially three mainstream choices, with a fourth rising:
+
+| Commitment | Built on | Trusted setup? | Proof size | Verify cost | Post-quantum? |
+|---|---|---|---|---|---|
+| **KZG** [@kzg2010] | elliptic-curve **pairings** | **Yes** (per circuit or universal) | constant (~1 element) | constant | No |
+| **FRI** [@fri2018] | **hashes** (Reed-Solomon) | **No** (transparent) | large, polylog | polylog | **Yes** |
+| **IPA** [@bulletproofs2018] | **discrete log** | **No** (transparent) | small, log | **linear** | No |
+| code-based [@brakedown2023] | **hashes** + linear codes | **No** | larger | sublinear | **Yes** |
+
+Read that table and the entire zoo falls into place. A "SNARK with tiny on-chain proofs but a setup ceremony" is KZG-based. A "transparent, quantum-safe, but bigger" proof is FRI-based. A "no setup, short proof, but slow to verify" system is IPA-based. Everything else is which Layer-1 protocol got bolted on top.
+
+::: {.callout-note icon=false}
+## Pairings, in one paragraph (the source of the trusted setup)
+
+A *pairing* is a special operation `e` on certain elliptic curves with one superpower: `e(g^a, g^b) = e(g, g)^{ab}`. It lets a verifier check a *multiplication* between two hidden numbers without learning them - exactly what verifying a quadratic R1CS constraint needs. KZG commitments use this to make proofs constant-size. The price: the commitment scheme needs public parameters built from a secret number that **must then be destroyed**. That secret is the "toxic waste," and disposing of it safely is the [trusted setup ceremony](#trusted-setup) we'll come to. The common curves are BN254 (Ethereum's pairing precompile [@eip197], now estimated below its original 128-bit security after a 2016 attack) and BLS12-381, designed by Zcash in 2017 to restore a safe margin [@bowe-bls12-381].
+:::
+
+---
+
+## Part 5 - The pairing-based SNARK family (and the ceremony problem)
+
+This is the oldest and, for on-chain use, still the most important family: KZG/pairing-based SNARKs with constant-size proofs.
+
+### The lineage
+
+```{mermaid}
+%%| fig-cap: "The pairing-based lineage: each step keeps the tiny proofs but tries to tame the trusted setup."
+graph LR
+    P["<b>Pinocchio</b> 2013<br/>first practical<br/>288-byte proof"] --> G["<b>Groth16</b> 2016<br/>3 elements<br/>size champion"]
+    G --> S["<b>Sonic</b> 2019<br/>universal +<br/>updatable setup"]
+    S --> PL["<b>PLONK</b> 2019<br/>universal setup<br/>+ custom gates"]
+    S --> M["<b>Marlin</b> 2019<br/>universal setup<br/>for R1CS"]
+    style P fill:#0891b2,color:#fff,stroke:none
+    style G fill:#0d9488,color:#fff,stroke:none
+    style S fill:#16a34a,color:#fff,stroke:none
+    style PL fill:#7c3aed,color:#fff,stroke:none
+    style M fill:#db2777,color:#fff,stroke:none
+```
+
+- **Pinocchio** (2013) was the first SNARK practical enough to actually use - constant 288-byte proofs, verification in milliseconds, with a toolchain that compiled a subset of C [@pinocchio2013]. (Its title is the more modest "*Nearly* Practical," and it built directly on the 2012 QAP construction of Gennaro, Gentry, Parno, and Raykova rather than inventing it.) It turned the QAP theory into running code and is the direct ancestor of Zcash.
+- **Groth16** (2016) remains the size and verification champion a decade later: the proof is exactly **three group elements** (roughly 128-200 bytes), and verification is a single pairing equation regardless of circuit size [@groth2016]. This is why it is still the default for putting proofs on a blockchain, where every byte costs gas. Its drawback is severe, though: the trusted setup is **circuit-specific**. Change one line of your program and you need a brand-new ceremony.
+- **Sonic, PLONK, and Marlin** (2019) attacked exactly that pain with a **universal and updatable** trusted setup: run one ceremony, reuse it for any circuit up to a size bound [@sonic2019; @plonk2019; @marlin2020]. **PLONK** in particular became wildly popular - its name is a backronym for "Permutations over Lagrange-bases for Oecumenical Noninteractive arguments of Knowledge," and its "Plonkish" arithmetization (custom gates plus a permutation argument that wires gates together) is now a de facto standard frontend [@plonk2019].
+
+::: {.callout-note icon=false}
+## Under the hood: PLONK's two ideas
+
+**Custom gates.** Instead of forcing everything into "one multiplication per constraint" like R1CS, PLONK uses a general gate equation with selector switches that can encode addition, multiplication, or richer combined operations in a single row - shrinking circuits.
+
+**The permutation argument (copy constraints).** Gates are independent rows; something must enforce "the output of gate 3 is the input of gate 7." PLONK does this with a permutation that cycles through all wires required to be equal, then proves via a running-product polynomial that permuting the wire values leaves the multiset unchanged - which is true exactly when the wired-together values are equal. Wiring becomes pure algebra.
+
+This pairs naturally with **lookup arguments** [@plookup2020] - a way to prove "this value appears in this precomputed table" - which make otherwise expensive operations (bitwise XOR, range checks like "x fits in 16 bits") cheap. "Plonkish + lookups" is the workhorse arithmetization of the late 2020s.
+:::
+
+### The trusted setup, demystified {#trusted-setup}
+
+The phrase "trusted setup" scares people, often more than it should. Here is what actually happens [@vitalik-trustedsetup].
+
+A pairing-based system needs public parameters - a **structured reference string** (SRS) - that encode the powers of a secret random number `tau` "in the exponent" on the curve. With the SRS, a prover can commit to enormous polynomials with a single small group element. The problem: anyone who knows `tau` itself - the **toxic waste** - can forge proofs out of thin air. So `tau` must never exist anywhere after setup.
+
+The solution is a **multi-party ceremony**. Participants take turns, each one multiplying the running parameters by their own secret random share and then destroying that share. The final `tau` is the product of everyone's shares, and it is secure as long as **at least one participant** was honest and deleted their piece - even if everyone else colludes. This is "1-of-N" trust, and it is why these ceremonies recruit hundreds of strangers across the globe.
+
+Zcash's ceremonies are the famous examples: the 2016 "Sprout" ceremony had six participants using air-gapped machines and DVD-Rs to move data (Edward Snowden was later revealed to be a participant), and the 2017-2018 Sapling ceremony split the work into a reusable "Powers of Tau" phase with 87 contributions and a circuit-specific phase with 90+ [@zcash-sapling-mpc]. The original 2014 scheme also taught the field a hard lesson: a soundness bug in it would have allowed undetectable counterfeiting, found and remediated only in 2018 [@zcash-counterfeit]. Trusted setups are manageable, but they are genuinely load-bearing.
+
+This single drawback - the ceremony, the toxic waste, the standing assumption that someone was honest - is the entire motivation for the other half of the zoo.
+
+---
+
+## Part 6 - The transparent family (no ceremony required)
+
+What if you drop pairings entirely and build everything out of hash functions? You lose the constant-size proofs, but you gain three things at once: **no trusted setup**, security resting only on hash functions (which means **post-quantum** safety, since quantum computers break elliptic curves but not hashes), and a prover that scales beautifully.
+
+### STARKs
+
+The flagship is the **STARK** - *Scalable Transparent ARgument of Knowledge* - introduced in 2018 [@stark2018]. The acronym is the selling points: **scalable** (prover near-linear, verifier polylogarithmic), **transparent** (no trusted setup, no toxic waste, nothing but public randomness).
+
+STARKs phrase computation differently from R1CS. They use an **AIR** (Algebraic Intermediate Representation): you lay the computation out as an **execution trace** - a big table where each row is the machine's state at one step and each column is a register - and impose polynomial constraints that must hold between every pair of adjacent rows. This trace-and-transition shape is a natural fit for proving the step-by-step execution of a CPU, which is why STARKs underpin most zkVMs.
+
+The cryptographic heart is **FRI** (Fast Reed-Solomon Interactive Oracle Proof of Proximity) [@fri2018], a hash-based way to prove that a committed function is close to a low-degree polynomial - the transparent stand-in for KZG. FRI works a bit like an FFT run in reverse: each round randomly folds the polynomial roughly in half, halving its degree, until what remains is small enough to check directly, with Merkle openings spot-checked for consistency between rounds. All you need is a collision-resistant hash.
+
+The tradeoff is proof size. Vitalik's framing captures it: where a SNARK proof is a few hundred bytes, a STARK proof is a few hundred **kilobytes** [@vitalik-starks]. For a blockchain that pays per byte, that is a lot - which is why, as we'll see, STARK-based systems often wrap their final proof in a Groth16 SNARK just to shrink it for on-chain posting.
+
+### Bulletproofs, Halo, and folding
+
+Three more transparent ideas round out the family, each solving a specific problem:
+
+- **Bulletproofs** (2018) produce short (logarithmic) proofs with no trusted setup, using only the discrete-log assumption and an **inner-product argument** - no pairings, no hashes-as-oracles [@bulletproofs2018]. Their Achilles' heel is **linear verification time**, so they shine for small statements like range proofs ("this hidden amount is non-negative"). **Monero** uses them exactly this way, for confidential transaction amounts [@monero-bulletproofs] - and note Monero is *not* a SNARK system at all; it's ring signatures plus Bulletproofs.
+- **Halo** (2019) cracked a long-standing problem: **recursion without a trusted setup** [@halo2019]. Recursion means one proof verifies another - essential for compressing an entire blockchain's history into a single proof - but it was stuck because the natural transparent commitment (IPA) verifies in linear time, which would blow up when nested. Halo's "accumulation" trick defers that expensive work into an accumulator checked just once at the end. Its successor **Halo 2** (announced late 2020) paired this with a Plonkish frontend and a swappable commitment backend, which made it a popular toolkit well beyond Zcash. Zcash's current Orchard pool runs on Halo 2 and, as of the May 2022 NU5 upgrade, **has no trusted setup at all** [@zcash-nu5].
+- **Folding schemes**, beginning with **Nova** (2022), are the newest big idea for repeated computation [@nova2022]. Instead of proving each step of a loop and recursively verifying, folding *merges* two computation instances into one for the cost of a couple of group operations, runs the merge for every step, and invokes a real (expensive) SNARK only once at the very end. For "the same circuit a million times" - exactly what a VM execution is - this is dramatically cheaper per step.
+
+There are also **Spartan** (a transparent R1CS SNARK built on the sum-check protocol, no FFTs [@spartan2020]) and the code-based commitments **Ligero** and **Brakedown** (linear-time provers, larger proofs, plausibly post-quantum [@ligero2017; @brakedown2023]). They matter because they feed the next generation of zkVMs.
+
+::: {.callout-note icon=false}
+## The sum-check protocol: the other workhorse
+
+One ingredient deserves a name-check because it shows up everywhere in the transparent world: the **sum-check protocol**, from 1990 [@lfkn1992]. It reduces "verify this astronomically large sum over a polynomial" to "evaluate the polynomial at one random point," through a short back-and-forth. It is the engine inside Spartan, HyperPlonk, HyperNova, and the lookup-based zkVMs. If KZG-land runs on pairings, much of transparent-land runs on sum-check.
+:::
+
+### Putting the families side by side
+
+The whole point of the decoder ring is comparison. Order-of-magnitude, representative figures (exact numbers depend on the circuit and curve):
+
+```{ojs}
+//| label: fig-proofsize
+//| fig-cap: "Representative proof sizes on a log scale, colored by trust model. Pairing/KZG systems (purple) pay a trusted setup to get the smallest proofs; transparent systems (teal = hash-based, amber = discrete-log) avoid the ceremony at the cost of size or verification speed. Orders of magnitude, not exact measurements."
+{
+  const data = [
+    {sys: "Groth16",      bytes: 200,     fam: "pairing / KZG (setup)",   color: "#7c3aed"},
+    {sys: "PLONK (KZG)",  bytes: 500,     fam: "pairing / KZG (setup)",   color: "#7c3aed"},
+    {sys: "Bulletproofs", bytes: 1500,    fam: "discrete-log (transparent)", color: "#d97706"},
+    {sys: "STARK (FRI)",  bytes: 150000,  fam: "hash-based (transparent)",   color: "#0d9488"}
+  ];
+  const w = 660, padL = 130, padR = 90, padT = 16, padB = 44;
+  const rowH = 42, gap = 14;
+  const h = padT + data.length * (rowH + gap) + padB;
+  const innerW = w - padL - padR;
+  const x = d3.scaleLog().domain([100, 300000]).range([padL, padL + innerW]);
+
+  const svg = d3.create("svg")
+    .attr("viewBox", `0 0 ${w} ${h}`)
+    .attr("width", "100%")
+    .style("max-width", "680px");
+
+  // gridlines at decades
+  [100, 1000, 10000, 100000].forEach(t => {
+    svg.append("line")
+      .attr("x1", x(t)).attr("x2", x(t))
+      .attr("y1", padT).attr("y2", h - padB)
+      .attr("stroke", "#e5e7eb").attr("stroke-width", 1);
+    svg.append("text")
+      .attr("x", x(t)).attr("y", h - padB + 16)
+      .attr("text-anchor", "middle").attr("font-size", "10px").attr("fill", "#9ca3af")
+      .text(t >= 1000 ? `${t/1000} KB` : `${t} B`);
+  });
+
+  data.forEach((d, i) => {
+    const y = padT + i * (rowH + gap);
+    svg.append("text")
+      .attr("x", padL - 12).attr("y", y + rowH/2 + 4)
+      .attr("text-anchor", "end").attr("font-size", "12px").attr("font-weight", "600")
+      .attr("fill", d.color).text(d.sys);
+    svg.append("rect")
+      .attr("x", padL).attr("y", y)
+      .attr("width", x(d.bytes) - padL).attr("height", rowH)
+      .attr("fill", d.color).attr("opacity", 0.85).attr("rx", 4);
+    svg.append("text")
+      .attr("x", x(d.bytes) + 8).attr("y", y + rowH/2 + 4)
+      .attr("font-size", "11px").attr("fill", "#374151")
+      .text(d.bytes >= 1000 ? `~${d.bytes/1000} KB` : `~${d.bytes} B`);
+  });
+  return svg.node();
+}
+```
+
+The master comparison, in one table:
+
+| Family | Examples | Setup | Proof size | Prover | Verify | Post-quantum | Assumption |
+|---|---|---|---|---|---|---|---|
+| Pairing / KZG, circuit-specific | Groth16 | per-circuit ceremony | **smallest** (~200 B) | fast | **fastest** | No | pairings |
+| Pairing / KZG, universal | PLONK, Marlin, Sonic | one universal ceremony | small (~0.5 KB) | fast | fast | No | pairings |
+| Hash-based | STARKs (FRI) | **none** | large (100s KB) | scalable | polylog | **Yes** | hashes |
+| Discrete-log | Bulletproofs, Halo2-IPA | **none** | small (log) | medium | **linear** | No | discrete log |
+| Folding | Nova, SuperNova | none | small final | tiny per-step | cheap | No | discrete log |
+| Code-based | Ligero, Brakedown | **none** | larger | **linear-time** | sublinear | **Yes** | hashes + codes |
+
+---
+
+## Part 7 - The *-ARK decoder ring (and the imposters)
+
+Now we can name names without drowning. Every real proof system is a point in the design space "(Layer-1 arithmetization) x (Layer-2 commitment) x (setup model)." Here is the decoder:
+
+| Name | Real system or tool? | Commitment | Setup | One-line identity |
+|---|---|---|---|---|
+| **Groth16** | system | pairing | per-circuit | smallest proof, oldest reliable workhorse |
+| **PLONK** | system | KZG (pairing) | universal | custom gates + permutation argument; ubiquitous frontend |
+| **Marlin** | system | KZG (pairing) | universal | universal setup, but for R1CS |
+| **Sonic** | system | KZG (pairing) | universal | first practical universal+updatable setup |
+| **HyperPlonk** | system | multilinear (pairing) | universal | PLONK with no FFTs, linear-time prover [@hyperplonk2023] |
+| **STARK** | system | FRI (hash) | none | transparent, post-quantum, big proofs |
+| **Bulletproofs** | system | IPA (discrete log) | none | short proofs, linear verify, great for ranges |
+| **Halo / Halo2** | system | IPA (or KZG) | none (IPA) | recursion with no trusted setup |
+| **Nova** | system | (folding) | none | fold repeated steps; cheap per-iteration |
+| **Spartan** | system | multilinear (hash) | none | transparent R1CS via sum-check, no FFTs |
+| **Ligero / Brakedown** | system | code-based (hash) | none | linear-time provers, larger proofs |
+| **arkworks** | **tool** (Rust) | - | - | a *library* of building blocks; `ark-groth16` *implements* Groth16 |
+| **gnark** | **tool** (Go) | - | - | a Go *library* for writing circuits and proving |
+| **circom** | **tool** | - | - | a *DSL/compiler* that emits R1CS |
+| **snarkjs** | **tool** (JS) | - | - | a *toolkit* that runs setup/prove/verify (pairs with circom) |
+
+The "-ark" in **arkworks** has nothing to do with the "-ARK" in SNARK; it is a Rust ecosystem of crates you build proof systems *with*. This single confusion accounts for a surprising amount of beginner bewilderment, so it is worth stating plainly: **arkworks, gnark, circom, and snarkjs are not proof systems** - they are the tools you use to deploy the proof systems above.
+
+::: {.callout-note icon=false}
+## A two-question triage for any new name you meet
+
+When you encounter "the new FooARK," ask:
+
+1. **What's its polynomial commitment?** KZG/pairing -> small proofs, needs a setup, not quantum-safe. FRI/hash -> transparent, quantum-safe, bigger. IPA/discrete-log -> transparent, small, slow verify.
+2. **What's its setup?** Per-circuit ceremony (Groth16-like), one universal ceremony (PLONK-like), or none (STARK-like)?
+
+Two answers place almost any system on the map. A third optional question - "R1CS, Plonkish, or AIR?" - tells you its frontend ergonomics.
+:::
+
+---
+
+## Part 8 - zkVMs: stop writing circuits
+
+Everything so far assumed someone translated a program into a circuit. That translation is brutal. Writing in **circom** feels like writing assembly for an alien machine: you hand-build arithmetic constraints. Higher-level DSLs (Cairo, Noir) help, but you are still authoring circuit-shaped logic in a special language, and a subtle bug yields a proof of the *wrong thing*.
+
+The **zkVM** is the idea that broke this open: build a circuit **once** for an entire CPU - its fetch-decode-execute loop - and then prove the execution of *any* program that runs on that CPU. You write ordinary Rust, compile it to a standard instruction set, run it, and the prover attests "this binary executed and produced this output." No circuit authoring at all.
+
+### RISC Zero in depth
+
+**RISC Zero** is the most prominent general-purpose zkVM, and a clean example of how all the pieces in this article snap together [@risc0-proofsystem]. It proves the execution of **RISC-V** binaries (the RV32IM instruction set - the same open ISA showing up in real silicon), so you write a normal Rust program, compile it to a RISC-V ELF, and prove it ran correctly.
+
+The vocabulary is worth learning because it generalizes [@risc0-terminology]:
+
+- **Guest** - your program, the Rust code compiled to RISC-V that runs *inside* the zkVM.
+- **Host** - the ordinary, untrusted program that runs the executor and asks for a proof.
+- **Image ID** - a cryptographic fingerprint of *exactly which program* was run. This is what lets a verifier know you proved the right binary and not some other one.
+- **Journal** - the public outputs the guest committed to (the part of the result everyone is allowed to see).
+- **Receipt** - the proof object: journal + a **seal** (the cryptographic attestation). Verifying the receipt convinces you the journal really came from running the program with that image ID.
+
+The proving pipeline is a layered compression that uses nearly every concept from this article at once:
+
+```{mermaid}
+%%| fig-cap: "RISC Zero's pipeline: a STARK proves RISC-V execution (transparent, scalable), recursion compresses it, and a final Groth16 wrap shrinks it to a few hundred bytes for cheap on-chain verification."
+graph LR
+    A["Rust guest<br/>-> RISC-V ELF"] --> B["Executor runs it<br/>-> execution trace"]
+    B --> C["Split into<br/>segments<br/>(continuations)"]
+    C --> D["STARK + FRI<br/>proves each<br/>segment"]
+    D --> E["Recursion<br/>folds segments<br/>into one STARK"]
+    E --> F["Groth16 wrap<br/>STARK -> tiny SNARK"]
+    F --> G["~200-byte receipt<br/>verified on-chain"]
+    style A fill:#0891b2,color:#fff,stroke:none
+    style D fill:#0d9488,color:#fff,stroke:none
+    style E fill:#16a34a,color:#fff,stroke:none
+    style F fill:#7c3aed,color:#fff,stroke:none
+    style G fill:#db2777,color:#fff,stroke:none
+```
+
+Reading it left to right ties the whole field together:
+
+1. The executor runs the RISC-V binary and records the **execution trace** (Part 6's AIR shape).
+2. Long runs are split into **segments** ("continuations") so memory stays bounded and segments can be proven in parallel.
+3. Each segment gets a **STARK** proof via **FRI** - transparent, no trusted setup, post-quantum (Part 6).
+4. **Recursion** compresses the many segment-proofs into a single succinct STARK (the Halo/Nova lineage of Part 6).
+5. Because that STARK is still hundreds of kilobytes - too big to post to a blockchain cheaply - a final **Groth16** circuit *verifies the STARK inside a SNARK* and emits a ~200-byte proof (Part 5).
+
+That last step is the punchline of the entire taxonomy: RISC Zero is **transparent where it counts** (the heavy proving is hash-based and ceremony-free) but **borrows a pairing SNARK at the very end** purely to get a small on-chain proof. The two families are not rivals so much as complementary tools, and a production system uses both. (One honest caveat: that Groth16 wrap does require a one-time trusted setup, which RISC Zero ran as a ceremony in 2024 - so the on-chain proof inherits a 1-of-N assumption even though the bulk of the system doesn't.)
+
+RISC Zero has matured fast: its R0VM 2.0 release (2025) reports proving an Ethereum block in well under a minute, with GPU acceleration and a hosted/decentralized proving service so you don't need a proving farm yourself [@risc0-r0vm2]. (Performance figures here are vendor-stated; treat them as directional.)
+
+### The rest of the zkVM field
+
+- **SP1** (Succinct) is the other major RISC-V zkVM, originally built on the Plonky3 toolkit (STARK/FRI), with a 2025 redesign ("Hypercube") that moved to a multilinear sum-check proof system - the same sum-check from Part 6, now at the heart of a production VM [@sp1-zkvm; @sp1-hypercube]. RISC Zero and SP1 are the two front-runners and both, as of 2026, are racing toward proving Ethereum blocks in real time. (Both have advertised "first formally verified RISC-V zkVM" claims, scoped differently; take such superlatives as vendor positioning.)
+- **Jolt** (a16z, 2024) takes a radically different route: build the VM almost entirely out of **lookup arguments**, the "lookup singularity" thesis that table lookups can be cheaper than arithmetic constraints for nearly everything [@a16z-lasso-jolt; @lasso2023]. It is a research-grade alpha, but its sum-check-and-lookups design is influential.
+- **Cairo** (StarkWare) is the production-proven outlier - a STARK-native language and VM rather than a RISC-V one - powering StarkNet.
+
+::: {.callout-note icon=false}
+## The catch: zkVMs are general, not free
+
+A zkVM proves a general CPU, so it pays to prove instructions your program never uses. The escape hatch is **precompiles**: hand-optimized circuits for hot operations (SHA-256, Keccak, elliptic-curve ops) that the VM can call instead of proving them instruction-by-instruction. The art of fast zkVM programming is largely the art of hitting precompiles. And the overall cost remains steep - see Part 10.
+:::
+
+---
+
+## Part 9 - What it's all for
+
+The theory is beautiful, but ZK proofs earn their keep in two big applications and a long tail of emerging ones.
+
+### Private money
+
+**Zcash** is the canonical privacy coin, and its history is a guided tour of SNARK evolution - each upgrade swapped in a better proof system:
+
+| Era | Proof system | Trusted setup | Activated |
+|---|---|---|---|
+| Sprout | BCTV14 SNARK | yes (per-circuit) | Oct 2016 |
+| Sapling | Groth16 | yes (per-circuit) | Oct 2018 |
+| Orchard | Halo 2 | **no** | May 2022 |
+
+The arc is exactly the tension this article is built around: from a fragile early setup (the BCTV14 era had a soundness bug that would have allowed undetectable counterfeiting, discovered in 2018 and disclosed in 2019 [@zcash-counterfeit]), to the rock-solid-but-ceremony-bound Groth16, to **Halo 2 with no trusted setup at all** [@zcash-nu5]. **Monero** takes a different path - ring signatures plus Bulletproofs for hidden amounts, no SNARK and no setup [@monero-bulletproofs].
+
+::: {.callout-important icon=false}
+## Removing the trusted setup did not remove the risk
+
+It is tempting to read that table as "and then they fixed everything." They did not. In May 2026, a researcher using an AI-assisted audit found a **soundness bug in the Orchard / Halo 2 circuit itself** - an under-constrained variable-base scalar-multiplication gadget in the `halo2_gadgets` library that let mathematically invalid inputs pass a check meant to reject them, which could have enabled undetectable counterfeiting of ZEC [@zcash-orchard-bug]. It had been live since the 2022 launch and survived multiple professional audits for over four years. Zcash disabled Orchard via an emergency soft fork and patched it with the NU6.2 hard fork in June 2026; there was no evidence of exploitation. The lesson is sharp and worth carrying through the rest of this article: **the trusted setup is only one of the ways a proof system can betray you.** A missing constraint in the circuit is a soundness hole no amount of ceremony hygiene can cover - the proof faithfully attests to the wrong statement. This is exactly why you do not hand-roll arithmetization.
+:::
+
+### Scaling blockchains: validity rollups
+
+The biggest commercial driver today is **zk-rollups** (more precisely, *validity rollups*). A rollup executes thousands of transactions off the main chain and posts a single proof that the whole batch was processed correctly; the main chain verifies that one small proof instead of re-running everything. This is succinctness turned into a business model.
+
+The contrast worth internalizing [@l2beat-risk]:
+
+| | Optimistic rollup | Validity (zk) rollup |
+|---|---|---|
+| Default assumption | batches are valid unless challenged | nothing trusted; correctness is proven |
+| Mechanism | fraud proof within a challenge window | validity proof (SNARK/STARK) up front |
+| Withdrawal delay | ~1 week (challenge period) | as fast as a proof is posted |
+| Relies on | at least one honest watcher | only cryptography |
+
+Real systems mix the families exactly as you'd now predict: **StarkNet** uses STARKs (transparent); **zkSync**'s prover is FRI-based, wrapped in a pairing-based PLONK/KZG proof for cheap on-chain verification; **Polygon zkEVM** proves with Plonky2 (PLONK + FRI); **Linea** ends in a gnark/PLONK proof. Vitalik's **"Type 1-4" zkEVM taxonomy** [@vitalik-zkevm] classifies how faithfully each reproduces Ethereum's exact behavior, trading EVM-equivalence (Type 1, hardest to prove) against prover-friendliness (Type 4, fastest but least compatible).
+
+### The long tail
+
+- **Proof of personhood / identity** - World ID uses ZK so a "unique human" check reveals nothing linkable.
+- **zk-email** - prove facts about an email by verifying its existing DKIM signature inside a circuit, disclosing only what you choose (e.g., "this address received a receipt from this company").
+- **zkTLS** - prove that data really came from a particular HTTPS server, no server cooperation needed.
+- **Proof of reserves** - an exchange proves it holds enough assets to cover deposits without publishing the balances (Binance shipped a zk-SNARK version post-FTX).
+- **zkML** - prove that a specific machine-learning model produced a given output, without revealing the model weights or the input.
+
+The common thread: anywhere you want to verify a fact without trusting the party asserting it, *and* without seeing the underlying data, a ZK proof is the tool.
+
+---
+
+## Part 10 - The cost reality (2026)
+
+A grounding note, because the marketing rarely leads with it: **proving is expensive; verification is cheap.** That asymmetry is the whole economic shape of the field.
+
+Generating a proof can cost on the order of **hundreds of thousands to a million times** more compute than just running the program natively - a16z put the zkVM overhead at "approaching one million times" native execution, with the best research systems pushing toward (but not yet reaching) a more practical 1,000x-100,000x band [@a16z-zkvm-progress]. Verifying, by contrast, is milliseconds and a few hundred thousand units of blockchain gas. You prove once, off-chain, slowly; everyone verifies cheaply, forever. That is exactly the bargain that makes rollups and verifiable computation worth it.
+
+The 2026 trend lines all push on the expensive side:
+
+- **Hardware acceleration** - GPUs are now standard for proving; FPGA and ASIC efforts (purpose-built proving chips) are arriving, with rough rules of thumb of ~10x per hardware generation, ultimately bounded by memory bandwidth.
+- **Proof markets** - decentralized networks where you pay someone with a GPU farm to generate your proof, turning proving into a commodity service.
+- **Real-time proving** - in late 2025 the Ethereum Foundation reported hitting its target of proving an Ethereum block within ~10 seconds on attainable hardware, a milestone that had looked years away [@ef-realtime-proving]. Per-proof costs fell by orders of magnitude across the year.
+
+The direction is clear: the math has been settled for a while; the last decade has been an engineering grind to make it cheap enough, and that grind is finally paying off.
+
+---
+
+## A decision guide for engineers
+
+If you are choosing a system rather than studying one, the triage is short:
+
+- **Putting a proof on a blockchain, need it tiny, circuit rarely changes?** Groth16 - smallest proof, cheapest verify, accept the per-circuit ceremony.
+- **Same, but the circuit evolves?** A PLONK-family system - one universal ceremony, custom gates, big tooling ecosystem (circom/snarkjs, gnark, halo2).
+- **Want no trusted setup and/or quantum resistance, can absorb bigger proofs?** A STARK.
+- **Proving a normal program and would rather not touch circuits at all?** A zkVM - RISC Zero or SP1 - and write Rust. Reach for precompiles on hot paths.
+- **Proving the same step many times (a VM, a chain)?** A folding scheme (Nova family) under the hood.
+- **Just a range proof or small statement, no setup?** Bulletproofs.
+
+And the meta-advice: **do not hand-roll the cryptography.** Use the audited tools (arkworks, gnark, halo2, circom/snarkjs, or a zkVM SDK). The history of this field includes real, deployed systems broken by setup bugs, weak Fiat-Shamir, and soundness flaws - the kind of mistakes that are invisible until someone forges a proof.
+
+---
+
+## Glossary {#glossary}
+
+| Term | Plain meaning |
+|---|---|
+| **Completeness** | true statements get accepted |
+| **Soundness** | false statements get rejected (a cheater is caught) |
+| **Zero-knowledge** | the verifier learns nothing but the truth of the statement |
+| **Simulator** | a fake-transcript generator; its existence *proves* zero-knowledge |
+| **Witness** | the secret data that makes a statement true (the thing you're not revealing) |
+| **Argument** | a proof that's sound only against a computationally bounded cheater |
+| **Proof of knowledge** | shows the prover actually *has* the witness, not just that one exists |
+| **SNARK** | Succinct Non-interactive ARgument of Knowledge - small, offline-checkable proof |
+| **STARK** | Scalable Transparent ARgument of Knowledge - hash-based, no setup, post-quantum |
+| **Sigma protocol** | the three-move commit/challenge/response shape (e.g. Schnorr) |
+| **Fiat-Shamir** | turn an interactive proof non-interactive by hashing for the challenge |
+| **Arithmetization** | re-encoding a computation as polynomial equations |
+| **R1CS / Plonkish / AIR** | three common arithmetization formats (constraints / custom gates / execution trace) |
+| **Polynomial commitment (PCS)** | a short cryptographic stand-in for a polynomial you can later open at points |
+| **KZG / FRI / IPA** | the three main PCS choices (pairing / hash / discrete-log) |
+| **Trusted setup** | a one-time ceremony producing public parameters; its secret ("toxic waste") must be destroyed |
+| **Transparent** | needs no trusted setup, only public randomness |
+| **Recursion** | a proof that verifies another proof |
+| **Folding** | cheaply merge repeated computation steps before proving |
+| **zkVM** | a proof system for a whole CPU; prove a compiled binary instead of a hand-built circuit |
+| **Validity rollup** | scaling design that posts a proof each batch is correct (vs optimistic fraud proofs) |
+
+---
+
+## References {.unnumbered}
+
+::: {#refs}
+:::

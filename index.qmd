@@ -6,3 +6,4 @@ toc: false
 - [LLM Failure Modes During Extended Task Execution](llm-failure-modes.qmd)
 - [Claude Code's Three Models — Haiku, Sonnet, Opus](claude-code-models.qmd)
 - [Should You Prompt Claude to Design Rust Types First?](types-first-prompting.qmd)
+- [A Field Guide to Zero-Knowledge Proofs](zk-proofs.qmd)

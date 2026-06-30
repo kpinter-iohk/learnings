@@ -1,0 +1,67 @@
+/* Zero-Knowledge Proofs article styles */
+
+/* Comparison tables are the backbone of this article - make them readable. */
+.quarto-figure table,
+table.table,
+main table {
+  font-size: 0.92em;
+}
+
+main table thead th {
+  background: #f5f3ff;
+  border-bottom: 2px solid #7c3aed;
+  font-weight: 700;
+}
+
+main table tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+
+main table td,
+main table th {
+  padding: 0.45em 0.7em;
+  vertical-align: top;
+}
+
+/* Mermaid and OJS figures: give them room and center captions. */
+figure.quarto-float-fig figcaption,
+.quarto-figure figcaption,
+figcaption.figure-caption {
+  font-size: 0.85em;
+  color: #6b7280;
+  font-style: italic;
+  margin-top: 0.5em;
+}
+
+div.cell-output-display svg {
+  display: block;
+  margin: 0 auto;
+}
+
+/* Mermaid diagrams sometimes render wide; keep them contained. */
+.cell pre.mermaid,
+pre.mermaid-js,
+.mermaid {
+  text-align: center;
+}
+
+/* Inline acronyms / system names read better with a touch of weight. */
+main p strong,
+main li strong {
+  color: #1f2937;
+}
+
+/* "Under the hood" callouts - lean mathematical asides the reader can skip. */
+.callout-note {
+  border-left-color: #7c3aed !important;
+}
+
+/* Code blocks: the few algebra snippets should not shout. */
+main p code,
+main li code,
+main td code {
+  background: #f3f4f6;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
