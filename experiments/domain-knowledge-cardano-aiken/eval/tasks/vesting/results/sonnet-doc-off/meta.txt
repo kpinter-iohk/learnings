@@ -1,0 +1,5 @@
+exit_code=1
+task=vesting
+arm=sonnet-doc-off
+timestamp=2026-05-24T11:03:21+02:00
+tests_present=no

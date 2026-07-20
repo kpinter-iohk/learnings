@@ -1,0 +1,42 @@
+    Compiling eval/vesting 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+   Collecting all tests scenarios across all modules
+      Testing ...
+
+    ┍━ main ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │ PASS [mem:  31.62 K, cpu:   9.79 M] eval_owner_alone_before_lock_passes
+    │ PASS [mem:  57.12 K, cpu:  18.95 M] eval_beneficiary_after_lock_passes
+    │ · with traces
+    │ | signed_by_owner ? False
+    │ PASS [mem:  53.73 K, cpu:  17.47 M] eval_beneficiary_before_lock_fails
+    │ · with traces
+    │ | signed_by_owner ? False
+    │ | time_reached ? False
+    │ PASS [mem:  39.43 K, cpu:  12.50 M] eval_no_signers_fails
+    │ · with traces
+    │ | signed_by_owner ? False
+    │ | signed_by_beneficiary ? False
+    │ PASS [mem:  45.69 K, cpu:  14.31 M] eval_stranger_after_lock_fails
+    │ · with traces
+    │ | signed_by_owner ? False
+    │ | signed_by_beneficiary ? False
+    │ PASS [mem:   1.09 K, cpu:   2.51 M] eval_missing_datum_fails
+    │ · with traces
+    │ | the validator crashed / exited prematurely
+    │ ✓ <expected> Some(datum) = datum_opt
+    ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6 tests | 6 passed | 0 failed
+
+
+
+  ⚠ I discovered an unused imported value: placeholder
+   ╭─[./validators/main.ak:5:56]
+ 4 │ use aiken/interval.{Interval}
+ 5 │ use cardano/transaction.{OutputReference, Transaction, placeholder} as eval_tx_module
+   ·                                                        ─────┬─────
+   ·                                                             ╰── unused import
+ 6 │ 
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+      Summary 6 checks, 0 errors, 1 warning

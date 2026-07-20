@@ -1,0 +1,5 @@
+exit_code=0
+task=brown-nft-burn
+arm=reference
+timestamp=2026-05-24T11:02:53+02:00
+tests_present=no

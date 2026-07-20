@@ -1,0 +1,40 @@
+    Compiling eval/brown-nft-burn 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+   Collecting all tests scenarios across all modules
+      Testing ...
+
+    ┍━ main ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │ PASS [mem:  40.83 K, cpu:  13.43 M] eval_mint_with_param_passes
+    │ PASS [mem:  42.22 K, cpu:  13.91 M] eval_mint_without_param_fails
+    │ · with traces
+    │ | utxo_consumed ? False
+    │ PASS [mem:  36.17 K, cpu:  10.53 M] eval_mint_two_tokens_fails
+    │ · with traces
+    │ | minted_qty == 1 ? False
+    │ PASS [mem:  34.37 K, cpu:  10.03 M] eval_mint_wrong_name_fails
+    │ · with traces
+    │ | name_ok ? False
+    │ PASS [mem:  35.14 K, cpu:  10.35 M] eval_burn_minus_one_no_param_passes
+    │ PASS [mem:  35.94 K, cpu:  10.48 M] eval_burn_minus_one_with_param_passes
+    │ PASS [mem:  35.77 K, cpu:  10.51 M] eval_burn_minus_two_fails
+    │ · with traces
+    │ | minted_qty == -1 ? False
+    │ PASS [mem:  34.67 K, cpu:  10.20 M] eval_burn_wrong_name_fails
+    │ · with traces
+    │ | name_ok ? False
+    ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8 tests | 8 passed | 0 failed
+
+
+
+  ⚠ I discovered an unused imported value: placeholder
+   ╭─[./validators/main.ak:7:80]
+ 6 │ use cardano/assets.{AssetName, PolicyId}
+ 7 │ use cardano/transaction.{Input, NoDatum, Output, OutputReference, Transaction, placeholder} as eval_tx_module
+   ·                                                                                ─────┬─────
+   ·                                                                                     ╰── unused import
+ 8 │ 
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+      Summary 8 checks, 0 errors, 1 warning

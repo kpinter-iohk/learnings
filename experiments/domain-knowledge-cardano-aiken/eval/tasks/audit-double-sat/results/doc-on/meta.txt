@@ -1,0 +1,5 @@
+exit_code=0
+task=audit-double-sat
+arm=doc-on
+timestamp=2026-05-24T11:07:36+02:00
+tests_present=no

@@ -1,0 +1,43 @@
+    Compiling eval/audit-double-sat 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+   Collecting all tests scenarios across all modules
+      Testing ...
+
+    ┍━ main ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │ PASS [mem:  65.74 K, cpu:  22.30 M] eval_tagged_full_payment_passes
+    │ PASS [mem:  21.55 K, cpu:   6.30 M] eval_no_outputs_fails
+    │ PASS [mem:  48.56 K, cpu:  17.32 M] eval_attack_other_ref_tag_fails
+    │ PASS [mem:  35.79 K, cpu:  12.16 M] eval_untagged_payment_fails
+    │ PASS [mem:  65.74 K, cpu:  22.30 M] eval_tagged_underpayment_fails
+    │ PASS [mem:  82.22 K, cpu:  28.62 M] eval_mixed_only_tagged_counts
+    │ FAIL [mem:  42.79 K, cpu:  14.20 M] eval_foreign_inline_datum_is_skipped
+    │ · with traces
+    │ | the validator crashed / exited prematurely
+    │ × <expected> tagged_ref: OutputReference = d
+    ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7 tests | 6 passed | 1 failed
+
+
+
+  ⚠ I discovered an unused imported value: placeholder
+   ╭─[./validators/main.ak:7:77]
+ 6 │ use cardano/assets
+ 7 │ use cardano/transaction.{InlineDatum, Output, OutputReference, Transaction, placeholder} as eval_tx_module
+   ·                                                                             ─────┬─────
+   ·                                                                                  ╰── unused import
+ 8 │ 
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+
+  ⚠ I discovered an unused imported module: eval_list
+   ╭─[./validators/main.ak:1:1]
+ 1 │ use aiken/collection/list as eval_list
+   · ───────────────────┬──────────────────
+   ·                    ╰── unused module
+ 2 │ use aiken/collection/list
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+      Summary 7 checks, 1 error, 2 warnings

@@ -1,0 +1,35 @@
+    Compiling eval/one-shot-nft 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+   Collecting all tests scenarios across all modules
+      Testing ...
+
+    ┍━ main ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │ PASS [mem:  38.52 K, cpu:  12.86 M] eval_param_consumed_one_token_passes
+    │ PASS [mem:  26.11 K, cpu:   8.90 M] eval_param_not_consumed_fails
+    │ · with traces
+    │ | utxo_consumed ? False
+    │ PASS [mem:  39.16 K, cpu:  13.02 M] eval_two_tokens_fails
+    │ · with traces
+    │ | exactly_one_nft ? False
+    │ PASS [mem:  38.29 K, cpu:  12.67 M] eval_wrong_name_fails
+    │ · with traces
+    │ | exactly_one_nft ? False
+    │ PASS [mem:  71.00 K, cpu:  22.36 M] eval_extra_asset_under_same_policy_fails
+    │ · with traces
+    │ | exactly_one_nft ? False
+    ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5 tests | 5 passed | 0 failed
+
+
+
+  ⚠ I discovered an unused imported value: placeholder
+   ╭─[./validators/main.ak:7:80]
+ 6 │ use cardano/assets.{AssetName, PolicyId}
+ 7 │ use cardano/transaction.{Input, NoDatum, Output, OutputReference, Transaction, placeholder} as eval_tx_module
+   ·                                                                                ─────┬─────
+   ·                                                                                     ╰── unused import
+ 8 │ 
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+      Summary 5 checks, 0 errors, 1 warning

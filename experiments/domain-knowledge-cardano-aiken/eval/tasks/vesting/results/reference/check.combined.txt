@@ -1,0 +1,4 @@
+    Compiling eval/vesting 0.0.0 (.)
+    Resolving eval/vesting
+      Fetched 1 package in 0.02s from cache
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)

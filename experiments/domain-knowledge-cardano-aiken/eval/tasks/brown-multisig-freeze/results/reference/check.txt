@@ -1,0 +1,40 @@
+    Compiling eval/brown-multisig-freeze 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+   Collecting all tests scenarios across all modules
+      Testing ...
+
+    ┍━ main ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │ PASS [mem: 114.19 K, cpu:  36.83 M] eval_threshold_met_after_freeze_passes
+    │ PASS [mem: 121.25 K, cpu:  38.96 M] eval_all_signers_after_freeze_passes
+    │ PASS [mem: 110.80 K, cpu:  35.35 M] eval_threshold_met_before_freeze_fails
+    │ · with traces
+    │ | unfrozen ? False
+    │ PASS [mem: 117.87 K, cpu:  37.48 M] eval_all_signers_before_freeze_fails
+    │ · with traces
+    │ | unfrozen ? False
+    │ PASS [mem:  92.50 K, cpu:  29.08 M] eval_below_threshold_after_freeze_fails
+    │ · with traces
+    │ | threshold_met ? False
+    │ PASS [mem: 120.67 K, cpu:  37.21 M] eval_outsiders_dont_count
+    │ · with traces
+    │ | threshold_met ? False
+    │ PASS [mem:   1.35 K, cpu:   3.01 M] eval_missing_datum_fails
+    │ · with traces
+    │ | the validator crashed / exited prematurely
+    │ ✓ <expected> Some(datum) = datum_opt
+    ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7 tests | 7 passed | 0 failed
+
+
+
+  ⚠ I discovered an unused imported value: placeholder
+   ╭─[./validators/main.ak:5:56]
+ 4 │ use aiken/interval.{Interval}
+ 5 │ use cardano/transaction.{OutputReference, Transaction, placeholder} as eval_tx_module
+   ·                                                        ─────┬─────
+   ·                                                             ╰── unused import
+ 6 │ 
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+      Summary 7 checks, 0 errors, 1 warning

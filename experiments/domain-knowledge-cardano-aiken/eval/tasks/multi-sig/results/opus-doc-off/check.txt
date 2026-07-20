@@ -1,0 +1,31 @@
+    Compiling eval/multi-sig 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+   Collecting all tests scenarios across all modules
+      Testing ...
+
+    ┍━ main ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │ PASS [mem:  94.71 K, cpu:  29.79 M] eval_3_of_5_exactly_3_signers_passes
+    │ PASS [mem: 101.77 K, cpu:  31.92 M] eval_3_of_5_all_5_signers_passes
+    │ PASS [mem:  86.48 K, cpu:  27.37 M] eval_3_of_5_only_2_signers_fails
+    │ PASS [mem:  60.63 K, cpu:  19.82 M] eval_3_of_5_zero_signers_fails
+    │ PASS [mem: 114.65 K, cpu:  35.50 M] eval_outsiders_dont_count
+    │ PASS [mem:   1.12 K, cpu:   2.59 M] eval_missing_datum_fails
+    │ · with traces
+    │ | the validator crashed / exited prematurely
+    │ ✓ <expected> Some(datum) = datum_opt
+    ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6 tests | 6 passed | 0 failed
+
+
+
+  ⚠ I discovered an unused imported value: placeholder
+   ╭─[./validators/main.ak:3:56]
+ 2 │ use aiken/crypto.{VerificationKeyHash}
+ 3 │ use cardano/transaction.{OutputReference, Transaction, placeholder} as eval_tx_module
+   ·                                                        ─────┬─────
+   ·                                                             ╰── unused import
+ 4 │ 
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+      Summary 6 checks, 0 errors, 1 warning

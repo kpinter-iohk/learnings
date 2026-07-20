@@ -1,0 +1,5 @@
+exit_code=0
+task=audit-loose-datum
+arm=reference
+timestamp=2026-05-24T11:03:02+02:00
+tests_present=no

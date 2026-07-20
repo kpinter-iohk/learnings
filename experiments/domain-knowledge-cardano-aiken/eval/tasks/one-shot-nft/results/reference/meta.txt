@@ -1,0 +1,5 @@
+exit_code=0
+task=one-shot-nft
+arm=reference
+timestamp=2026-05-24T11:03:30+02:00
+tests_present=no

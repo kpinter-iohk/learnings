@@ -1,0 +1,41 @@
+    Compiling eval/audit-datum-continuity 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+   Collecting all tests scenarios across all modules
+      Testing ...
+
+    ┍━ main ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │ PASS [mem:  80.84 K, cpu:  28.35 M] eval_authority_signs_counter_incs_passes
+    │ PASS [mem:  81.47 K, cpu:  28.51 M] eval_authority_signs_counter_wrong_fails
+    │ · with traces
+    │ | counter_incremented ? False
+    │ PASS [mem:  77.05 K, cpu:  26.92 M] eval_authority_changed_fails
+    │ · with traces
+    │ | authority_preserved ? False
+    │ PASS [mem:  74.95 K, cpu:  26.11 M] eval_stranger_signs_fails
+    │ · with traces
+    │ | authority_signed ? False
+    │ PASS [mem:  43.05 K, cpu:  15.15 M] eval_no_continuing_output_fails
+    │ · with traces
+    │ | the validator crashed / exited prematurely
+    │ ✓ <expected> Some(out) =
+    │       list.find(tx.outputs, fn(o) { o.address == own_input.output.address })
+    │ PASS [mem:  21.67 K, cpu:   6.72 M] eval_missing_datum_fails
+    │ · with traces
+    │ | the validator crashed / exited prematurely
+    │ ✓ <expected> Some(in_state) = datum_opt
+    ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6 tests | 6 passed | 0 failed
+
+
+
+  ⚠ I discovered an unused imported value: placeholder
+   ╭─[./validators/main.ak:5:93]
+ 4 │ use cardano/assets
+ 5 │ use cardano/transaction.{InlineDatum, Input, NoDatum, Output, OutputReference, Transaction, placeholder} as eval_tx_module
+   ·                                                                                             ─────┬─────
+   ·                                                                                                  ╰── unused import
+ 6 │ 
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+      Summary 6 checks, 0 errors, 1 warning

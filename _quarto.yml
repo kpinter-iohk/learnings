@@ -16,6 +16,8 @@ website:
         text: Claude Code Models
       - href: types-first-prompting.qmd
         text: Types-First Prompting
+      - href: cardano-patterns.qmd
+        text: Cardano Patterns
       - href: zk-proofs.qmd
         text: Zero-Knowledge Proofs
 

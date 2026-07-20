@@ -1,0 +1,19 @@
+    Compiling eval/multi-sig 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+        Error aiken::check::unknown::module
+
+  × While trying to make sense of your code...
+  ╰─▶ I stumbled upon a reference to an unknown module: 'list'
+      
+    ╭─[./validators/main.ak:15:3]
+ 13 │   extra_signatories: List<VerificationKeyHash>,
+ 14 │ ) -> Int {
+ 15 │   list.foldl(
+    ·   ──┬─
+    ·     ╰── unknown module
+ 16 │     signers,
+ 17 │     0,
+    ╰────
+  help: Did you forget to add a package as dependency?
+
+      Summary 1 error, 0 warnings

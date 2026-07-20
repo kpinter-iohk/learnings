@@ -1,0 +1,5 @@
+exit_code=0
+task=brown-vesting-arbiter
+arm=reference
+timestamp=2026-05-24T11:02:50+02:00
+tests_present=no

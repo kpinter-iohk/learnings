@@ -1,0 +1,48 @@
+    Compiling eval/audit-double-sat 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+   Collecting all tests scenarios across all modules
+      Testing ...
+
+    ┍━ main ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │ PASS [mem:  66.04 K, cpu:  22.34 M] eval_tagged_full_payment_passes
+    │ PASS [mem:  22.68 K, cpu:   6.61 M] eval_no_outputs_fails
+    │ · with traces
+    │ | total_paid >= datum.price ? False
+    │ PASS [mem:  49.49 K, cpu:  17.52 M] eval_attack_other_ref_tag_fails
+    │ · with traces
+    │ | total_paid >= datum.price ? False
+    │ PASS [mem:  34.62 K, cpu:  10.28 M] eval_untagged_payment_fails
+    │ · with traces
+    │ | total_paid >= datum.price ? False
+    │ PASS [mem:  66.67 K, cpu:  22.50 M] eval_tagged_underpayment_fails
+    │ · with traces
+    │ | total_paid >= datum.price ? False
+    │ PASS [mem:  80.22 K, cpu:  26.47 M] eval_mixed_only_tagged_counts
+    │ PASS [mem:  82.54 K, cpu:  27.17 M] eval_foreign_inline_datum_is_skipped
+    ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7 tests | 7 passed | 0 failed
+
+
+
+  ⚠ I discovered an unused imported value: placeholder
+   ╭─[./validators/main.ak:7:77]
+ 6 │ use cardano/assets
+ 7 │ use cardano/transaction.{InlineDatum, Output, OutputReference, Transaction, placeholder} as eval_tx_module
+   ·                                                                             ─────┬─────
+   ·                                                                                  ╰── unused import
+ 8 │ 
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+
+  ⚠ I discovered an unused imported module: eval_list
+   ╭─[./validators/main.ak:1:1]
+ 1 │ use aiken/collection/list as eval_list
+   · ───────────────────┬──────────────────
+   ·                    ╰── unused module
+ 2 │ use aiken/collection/list
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+      Summary 7 checks, 0 errors, 2 warnings

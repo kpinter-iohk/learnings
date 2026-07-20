@@ -1,0 +1,184 @@
+---
+title: "Cardano Smart Contract Patterns"
+subtitle: "Six techniques the eUTXO model forced into existence — what they solve, what they cost, what Ethereum gets for free"
+toc: true
+toc-depth: 2
+toc-title: "Patterns"
+number-sections: false
+css: cardano-patterns.css
+format:
+  html:
+    page-layout: article
+    smooth-scroll: true
+---
+
+## Introduction
+
+If you come to Cardano from Ethereum, the first thing to know is that it is not the same machine with different syntax. The execution model — Cardano calls it **eUTXO** — is fundamentally different, and that difference has teeth. Problems that take one line of Solidity can take a whole protocol-design pattern to solve in Cardano. And the reverse is also true: a class of attack Ethereum has spent years hardening against simply does not exist on Cardano, because the architecture rules it out.
+
+This article walks through six patterns that show up over and over in real Cardano protocols. None of them are "best practices" in the soft sense. Each one is the canonical way to recover an abstraction that eUTXO took away from us, and together they form a tour of what the model lacks, what Ethereum gives us for free, and what Ethereum pays for that freedom.
+
+The on-chain code is written in [Aiken](https://aiken-lang.org/), Cardano's modern smart-contract language. The off-chain transaction construction is in Rust, using [`cardano-serialization-lib`](https://crates.io/crates/cardano-serialization-lib) — the canonical low-level library. Both halves live under `experiments/cardano-patterns/` in this repo and compile cleanly.
+
+::: {.callout-note icon=false}
+## On vocabulary
+
+Cardano has a lot of vocabulary — UTxO, datum, redeemer, validator, minting policy, and more — and most learning material drops it on you up front. This article does the opposite: terms get introduced one at a time, after you have already met the concept in plain words. Where it doesn't muddy the writing, "coin" replaces UTxO and "script" replaces validator. A short glossary at the [end](#glossary) maps the plain words back to the standard terms.
+:::
+
+---
+
+## Pattern 1 · One-shot minting
+
+### Problem
+
+We want to create a token that can be minted exactly once and never again — a founder's badge, say, or a single "admin" token whose existence proves we deployed a protocol. On Ethereum this is a one-liner: flip a `bool minted` flag in storage the first time the mint function runs, and check that flag every subsequent call. Cardano gives us no such option. A minting policy in Cardano is a pure function: every time someone tries to mint under it, the policy runs from scratch with no record of whether it has run before. There is no storage slot to remember "I already fired." So how do we encode "only once" in a function that has no memory?
+
+### Solution
+
+The trick is to piggyback on something the chain already guarantees: every coin can be spent exactly once, and after it's spent, it is gone forever. So we pick a coin we own — call it the **seed** — and we bake its identifier into the minting policy at the moment we write the policy. The policy's only rule is then: *"this transaction must consume the seed."* The first time someone mints, they include the seed as an input. That works, because the seed exists. From then on, anyone trying to mint under this policy has to consume a coin that no longer exists, and the chain rejects the transaction before the policy even runs. The policy never has to remember anything; the chain's existing rule that a coin can only be spent once does the work for us.
+
+### Where used
+
+**NFT collections issued in one transaction.** The creator picks a coin from their wallet to use as the seed, and mints the entire collection — say, 10,000 unique tokens — in the same transaction that spends the seed. After that, the policy is dead. Anyone curious about the supply can look at the policy's parameters, see which coin was the seed, and confirm that coin has been gone from the ledger ever since. There can never be a 10,001st token, and the proof is mechanical.
+
+**Protocol bootstrap tokens.** When a new protocol launches, the deployers mint one "admin" or "genesis" token whose mere existence proves they set the protocol up. The token then becomes the credential for upgrade authority, oracle ownership, fee collection — whoever holds it has those powers. Because the policy is one-shot, the token can never be re-minted by an impostor or by the original deployer later having second thoughts.
+
+**As a building block for the next pattern.** State-thread tokens (the next pattern) need a unique stamp to mark legitimate state. That stamp is itself created by a one-shot mint. The two patterns appear together so often that you can think of one-shot minting as the unit primitive and state-threading as its main customer.
+
+### The on-chain rule, in Aiken
+
+The whole on-chain rule fits in six lines. It takes the seed as a parameter — the coin we baked in when we wrote the policy — and asks one question: is the seed among the inputs being consumed by this transaction?
+
+```aiken
+use aiken/collection/list
+use cardano/transaction.{OutputReference, Transaction}
+
+validator one_shot(seed: OutputReference) {
+  mint(_redeemer: Data, _policy_id: ByteArray, self: Transaction) {
+    list.any(self.inputs, fn(input) { input.output_reference == seed })
+  }
+
+  else(_) {
+    fail
+  }
+}
+```
+
+Reading it top to bottom: `OutputReference` is a `(transaction_id, output_index)` pair, the unique identifier of any coin on the chain. `self` is the transaction the policy is being evaluated against, so `self.inputs` is the list of coins this transaction is consuming. `list.any` does what it says — at least one element of the list matches the predicate. The predicate just checks whether an input's coin identifier equals the seed.
+
+The `else(_) { fail }` clause is defensive bookkeeping. An Aiken validator is a single script that can play multiple roles depending on how the chain invokes it — minting, spending, withdrawing, voting, and so on. We only want the minting role here, so `else` rejects everything else. In practice the chain wouldn't invoke this script in any of those other roles, but writing the rejection out explicitly makes the intent unambiguous.
+
+### The off-chain side, in Rust
+
+The on-chain rule is only half the system. The other half is the off-chain code that actually constructs a transaction satisfying it. To mint the token, our transaction has to do two things at the same time: spend the seed coin, and request the mint under the policy whose code we already parameterized by that very seed.
+
+::: {.callout-note icon=false}
+## A note on the code below
+
+The Rust snippets in this article are simplified **pseudo-Rust**. The real `cardano-serialization-lib` code — full of `csl::BigNum::from(...)`, `&` references, `.unwrap()` calls, and other library noise — lives at `experiments/cardano-patterns/offchain/src/bin/one_shot_mint.rs` and compiles cleanly. The pseudo version strips the API plumbing so the *pattern* is what you see.
+:::
+
+```rust
+// Constants from the wallet / build pipeline.
+const SEED_TXID:      TxHash = "0000…0001";
+const SEED_INDEX:     u32    = 0;
+const APPLIED_POLICY: Bytes  = "58b1010100…01000001";
+
+fn main() {
+    let policy    = PlutusV3Script::from_bytes(APPLIED_POLICY);
+    let policy_id = policy.hash();
+    // policy_id = 5c8559f2…46cd0
+
+    let tx = build_mint_tx(policy, policy_id);
+}
+```
+
+Two pieces of `build_mint_tx` matter for the pattern. The first is the input that consumes the seed:
+
+```rust
+let seed_input = TxInput::new(SEED_TXID, SEED_INDEX);
+inputs.add(seed_input, ada(10_000_000));
+builder.set_inputs(inputs);
+```
+
+This is the line that ultimately satisfies the on-chain rule. Without it, the validator's `list.any` returns false and the mint is rejected. The second is the mint itself:
+
+```rust
+let redeemer     = unit();                                  // validator ignores it
+let mint_witness = plutus_mint_witness(policy, redeemer);
+
+let mut mint = MintBuilder::new();
+mint.add_asset(mint_witness, asset_name("OneShot"), 1);     // +1 = mint, -1 = burn
+builder.set_mint(mint);
+```
+
+The redeemer is the empty constructor `Constr 0 []` — the Plutus equivalent of `()`. Our validator never looks at the redeemer (it only inspects the input list), so we pass the trivial value by convention.
+
+Everything else in the transaction is plumbing: the output that receives the freshly minted token plus the minimum amount of ADA required to hold a token, change calculation, fee balancing, and a collateral input the chain will only seize if the script fails. The full file handles all of that.
+
+One thing worth flagging explicitly. The compiled bytecode of the policy bakes in the seed — change the seed, and you get different bytecode, and therefore a different policy ID. Aiken's CLI does the parameter application at build time:
+
+```bash
+aiken blueprint apply \
+    --module one_shot --validator one_shot \
+    <plutus-data-cbor-of-the-seed>
+```
+
+Higher-level off-chain libraries (Pallas, Lucid Evolution, Mesh) handle this for you — your code passes the seed value and the library does the wrapping behind the scenes. `cardano-serialization-lib` is lower-level and does not include any UPLC manipulation, so we run the parameter application as a separate build step and embed the resulting hex in the Rust source.
+
+<!-- WIDGET_IDEA — Seed lifecycle — shows why "one-shot" is structural, not enforced. Visualize the ledger across three moments: (1) before mint — seed UTxO present, mint can fire; (2) the minting tx — seed consumed, token created; (3) after — seed gone, any future mint attempt must reference a UTxO that no longer exists, chain rejects. Animation/scrub-bar through these states, with the seed icon vanishing at the cut. -->
+
+<!-- WIDGET_IDEA — Parameter → policy ID — shows that the policy ID is a hash of the parameterized bytecode. Slider/picker for the seed, live-updated bytecode hex preview, live-updated policy ID. Reinforces that two different seeds give two structurally different policies. -->
+
+The whole on-chain rule, condensed to its essence, is one line of pseudocode:
+
+```js
+tx.inputs.some(input => input.output_reference === seed)
+```
+
+Everything else in the Aiken file is type declarations and the defensive `else(_) { fail }` clause we covered earlier. The smallest non-trivial Cardano validator really is this small.
+
+### What Ethereum does instead
+
+The Solidity version is, frankly, trivial:
+
+```solidity
+bool minted;
+function mint() external {
+    require(!minted, "already minted");
+    minted = true;
+    _mint(msg.sender, 1, "");
+}
+```
+
+Ethereum contracts have persistent storage, so they can just remember whether the mint has happened. Cardano's policies cannot, since every invocation starts from a fresh world. The pattern we walked through is the canonical way to recover "this has happened before" without storage: instead of inventing a flag and tracking it, the policy points at a coin that is itself single-use, and lets the ledger's natural laws do the bookkeeping.
+
+That trick costs Ethereum nothing at the language level, but it is not free at the system level. Every contract on Ethereum carries a state root that every node has to keep around forever, and `SLOAD` / `SSTORE` operations in user code cost gas at every call. Ethereum's state has been growing roughly linearly for a decade and has become one of its hardest scaling problems. The Cardano version, by contrast, has zero storage overhead at the protocol layer — the seed is baked into the policy bytes, the seed coin is consumed exactly once and then leaves the active set, and there is no flag, no slot, nothing to forget.
+
+This is the article's recurring shape. Each pattern recovers a convenience Ethereum gives us for free; Ethereum's gift in turn comes attached to a real long-term cost.
+
+---
+
+## What's next
+
+One pattern down, five to go. The remaining five — **state-thread tokens** for mutable state without storage slots, **forwarding minting policies** for letting one script defer to another, **cooperative arguments** for avoiding quadratic-blowup checks, the **withdraw-zero trick** for sneaking a once-per-transaction hook out of the staking system, and **reference scripts** for deduplicating script bytecode across transactions — all build on the same primitives demonstrated here. They will be added as separate sections as the article grows.
+
+---
+
+## Glossary {#glossary}
+
+A short table mapping plain words in this article back to standard Cardano terminology.
+
+| Plain word in this article | Standard term | What it is |
+|---|---|---|
+| coin | UTxO (unspent transaction output) | A discrete chunk of value at an address; each can be spent exactly once |
+| script | validator | A piece of code that approves or rejects a transaction action |
+| token-creation rules | minting policy | A script that runs when tokens are minted or burned under a given policy id |
+| data attached to a coin | datum | Plutus-encoded data carried by a UTxO |
+| argument passed when spending | redeemer | Plutus-encoded data supplied by the spender to the script |
+| staking script | stake validator | A script that runs on reward withdrawal, stake delegation, etc. |
+| script address | script-locked address | An address whose payment credential is a script hash |
+| unique stamp | NFT (non-fungible token) | A token with quantity exactly one |
+
+Standard names like **CIP-31** (reference inputs), **CIP-32** (inline datums), and **CIP-33** (reference scripts) are kept out of the prose. They will appear in the patterns that use them, with one-line definitions at first mention.

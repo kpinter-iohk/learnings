@@ -1,0 +1,28 @@
+    Compiling eval/audit-loose-datum 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+   Collecting all tests scenarios across all modules
+      Testing ...
+
+    ┍━ main ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │ PASS [mem:  24.86 K, cpu:   8.10 M] eval_owner_signs_with_datum_passes
+    │ PASS [mem:  26.42 K, cpu:   8.55 M] eval_stranger_signs_fails
+    │ PASS [mem:  23.29 K, cpu:   7.65 M] eval_no_signers_fails
+    │ PASS [mem:   4.36 K, cpu: 966.96 K] eval_missing_datum_owner_signs_fails
+    │ PASS [mem:   4.36 K, cpu: 966.96 K] eval_missing_datum_stranger_signs_fails
+    │ PASS [mem:   4.36 K, cpu: 966.96 K] eval_missing_datum_no_signers_fails
+    ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6 tests | 6 passed | 0 failed
+
+
+
+  ⚠ I discovered an unused imported value: placeholder
+   ╭─[./validators/main.ak:3:56]
+ 2 │ use aiken/crypto.{VerificationKeyHash}
+ 3 │ use cardano/transaction.{OutputReference, Transaction, placeholder} as eval_tx_module
+   ·                                                        ─────┬─────
+   ·                                                             ╰── unused import
+ 4 │ 
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+      Summary 6 checks, 0 errors, 1 warning

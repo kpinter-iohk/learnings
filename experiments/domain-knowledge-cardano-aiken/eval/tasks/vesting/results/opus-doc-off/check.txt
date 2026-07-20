@@ -1,0 +1,23 @@
+    Compiling eval/vesting 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+]8;;https://aiken-lang.org/language-tour/custom-types#generics\        Error aiken::check::arity::generic (link)]8;;\
+
+  × While trying to make sense of your code...
+  ╰─▶ I noticed a generic data-type with 1 type parameters instead of 0.
+      
+    ╭─[./validators/main.ak:19:28]
+ 17 │ }
+ 18 │ 
+ 19 │ fn must_start_after(range: Interval<Int>, lock_until: Int) -> Bool {
+    ·                            ──────┬──────
+    ·                                  ╰── incorrect generic arity
+ 20 │   when range.lower_bound.bound_type is {
+ 21 │     Finite(lower) -> lower >= lock_until
+    ╰────
+  help: Data-types without generic parameters should be written without
+        chevrons.
+        Perhaps, try the following:
+        
+        ╰─▶  Interval
+
+      Summary 1 error, 0 warnings

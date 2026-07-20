@@ -1,0 +1,37 @@
+    Compiling eval/one-shot-nft 0.0.0 (.)
+    Compiling aiken-lang/stdlib v3.1.0 (./build/packages/aiken-lang-stdlib)
+   Collecting all tests scenarios across all modules
+      Testing ...
+
+    ┍━ main ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │ PASS [mem:  39.43 K, cpu:  13.08 M] eval_param_consumed_one_token_passes
+    │ PASS [mem:  36.89 K, cpu:  12.32 M] eval_param_not_consumed_fails
+    │ · with traces
+    │ | consumed ? False
+    │ PASS [mem:  40.06 K, cpu:  13.24 M] eval_two_tokens_fails
+    │ · with traces
+    │ | qty_ok ? False
+    │ PASS [mem:  38.49 K, cpu:  12.71 M] eval_wrong_name_fails
+    │ · with traces
+    │ | name_ok ? False
+    │ PASS [mem:  63.63 K, cpu:  21.03 M] eval_extra_asset_under_same_policy_fails
+    │ · with traces
+    │ | the validator crashed / exited prematurely
+    │ ✓ <expected> [Pair(minted_name, minted_qty)] =
+    │       tx.mint |> assets.tokens(policy_id) |> dict.to_pairs()
+    ┕━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5 tests | 5 passed | 0 failed
+
+
+
+  ⚠ I discovered an unused imported value: placeholder
+   ╭─[./validators/main.ak:7:80]
+ 6 │ use cardano/assets.{AssetName, PolicyId}
+ 7 │ use cardano/transaction.{Input, NoDatum, Output, OutputReference, Transaction, placeholder} as eval_tx_module
+   ·                                                                                ─────┬─────
+   ·                                                                                     ╰── unused import
+ 8 │ 
+   ╰────
+  help: No big deal, but you might want to remove it to get rid of that
+        warning.
+
+      Summary 5 checks, 0 errors, 1 warning

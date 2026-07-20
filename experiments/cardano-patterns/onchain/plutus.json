@@ -1,0 +1,84 @@
+{
+  "preamble": {
+    "title": "krisztianpinter/onchain",
+    "description": "Aiken contracts for project 'krisztianpinter/onchain'",
+    "version": "0.0.0",
+    "plutusVersion": "v3",
+    "compiler": {
+      "name": "Aiken",
+      "version": "v1.1.21+42babe5"
+    },
+    "license": "Apache-2.0"
+  },
+  "validators": [
+    {
+      "title": "one_shot.one_shot.mint",
+      "redeemer": {
+        "title": "_redeemer",
+        "schema": {
+          "$ref": "#/definitions/Data"
+        }
+      },
+      "parameters": [
+        {
+          "title": "seed",
+          "schema": {
+            "$ref": "#/definitions/cardano~1transaction~1OutputReference"
+          }
+        }
+      ],
+      "compiledCode": "5887010100229800aba2aba1aab9faab9eaab9dab9a48888896600264646644b30013370e900018031baa00189991198008009bac300b30093754601600c6eb8c024c01cdd5000912cc00400629422b30013375e601660126ea8c02c00403a29462660040046018002803900a459005180380098039804000980380098019baa0078a4d13656400401",
+      "hash": "b1a80f2cee058198c38a5f16ab14180fbe9a570c6745dbc1969fbcdb"
+    },
+    {
+      "title": "one_shot.one_shot.else",
+      "redeemer": {
+        "schema": {}
+      },
+      "parameters": [
+        {
+          "title": "seed",
+          "schema": {
+            "$ref": "#/definitions/cardano~1transaction~1OutputReference"
+          }
+        }
+      ],
+      "compiledCode": "5887010100229800aba2aba1aab9faab9eaab9dab9a48888896600264646644b30013370e900018031baa00189991198008009bac300b30093754601600c6eb8c024c01cdd5000912cc00400629422b30013375e601660126ea8c02c00403a29462660040046018002803900a459005180380098039804000980380098019baa0078a4d13656400401",
+      "hash": "b1a80f2cee058198c38a5f16ab14180fbe9a570c6745dbc1969fbcdb"
+    }
+  ],
+  "definitions": {
+    "ByteArray": {
+      "title": "ByteArray",
+      "dataType": "bytes"
+    },
+    "Data": {
+      "title": "Data",
+      "description": "Any Plutus data."
+    },
+    "Int": {
+      "dataType": "integer"
+    },
+    "cardano/transaction/OutputReference": {
+      "title": "OutputReference",
+      "description": "An `OutputReference` is a unique reference to an output on-chain. The `output_index`\n corresponds to the position in the output list of the transaction (identified by its id)\n that produced that output",
+      "anyOf": [
+        {
+          "title": "OutputReference",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "transaction_id",
+              "$ref": "#/definitions/ByteArray"
+            },
+            {
+              "title": "output_index",
+              "$ref": "#/definitions/Int"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

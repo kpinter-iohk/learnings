@@ -1,0 +1,5 @@
+exit_code=0
+task=multi-sig
+arm=sonnet-doc-on
+timestamp=2026-05-24T11:03:48+02:00
+tests_present=no
