@@ -6,5 +6,5 @@ toc: false
 - [LLM Failure Modes During Extended Task Execution](llm-failure-modes.qmd)
 - [Claude Code's Three Models — Haiku, Sonnet, Opus](claude-code-models.qmd)
 - [Should You Prompt Claude to Design Rust Types First?](types-first-prompting.qmd)
-- [Cardano Smart Contract Patterns](cardano-patterns.qmd)
-- [A Field Guide to Zero-Knowledge Proofs](zk-proofs.qmd)
+- [Cardano Smart Contract Patterns](cardano-patterns.qmd) _(WIP)_
+- [A Field Guide to Zero-Knowledge Proofs](zk-proofs.qmd) _(WIP)_

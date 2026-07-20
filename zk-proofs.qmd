@@ -16,6 +16,11 @@ format:
     smooth-scroll: true
 ---
 
+::: {.callout-warning icon=false}
+## Work in progress
+This article is an actively evolving draft. Sections may be incomplete, reworded, or expanded, and specifics should be treated as provisional until this notice is removed.
+:::
+
 ## Why this article exists
 
 You already know the one-sentence version: a zero-knowledge proof lets you convince someone that a statement is true without revealing anything beyond the fact that it is true. You can prove you know a password without sending it, prove you are over 18 without showing your birthday, prove a thousand transactions are valid without replaying any of them.

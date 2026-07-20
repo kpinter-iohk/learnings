@@ -12,6 +12,11 @@ format:
     smooth-scroll: true
 ---
 
+::: {.callout-warning icon=false}
+## Work in progress
+This article is an actively evolving draft. One pattern of six is written so far; the rest, and further revisions, are still to come. Treat specifics as provisional until this notice is removed.
+:::
+
 ## Introduction
 
 If you come to Cardano from Ethereum, the first thing to know is that it is not the same machine with different syntax. The execution model — Cardano calls it **eUTXO** — is fundamentally different, and that difference has teeth. Problems that take one line of Solidity can take a whole protocol-design pattern to solve in Cardano. And the reverse is also true: a class of attack Ethereum has spent years hardening against simply does not exist on Cardano, because the architecture rules it out.
